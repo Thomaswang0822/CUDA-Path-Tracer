@@ -1,13 +1,10 @@
-CUDA Path Tracer
-================
+# CUDA Path Tracer
 
-**University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 3**
+This project serves to:
 
-* (TODO) YOUR NAME HERE
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+1. refresh my memory on path tracing and related techniques;
+2. gain more insight on shipping a path tracer to GPU;
 
-### (TODO: Your README)
+It is forked from the starter code of [**University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 3**](https://github.com/CIS565-Fall-2022/Project3-CUDA-Path-Tracer), and will not be submitted as any schoolwork.
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
-
+The primary reference code I used is by [@HummaWhite](https://github.com/CIS565-Fall-2023/Project3-CUDA-Path-Tracer).
