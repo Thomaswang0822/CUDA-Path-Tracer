@@ -4,7 +4,7 @@
 #include <sstream>
 #include <fstream>
 #include <iostream>
-#include "glm/glm.hpp"
+#include "materials.h"
 #include "utilities.h"
 #include "sceneStructs.h"
 

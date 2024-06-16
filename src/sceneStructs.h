@@ -28,18 +28,6 @@ struct Geom {
     glm::mat4 invTranspose;
 };
 
-struct Material {
-    glm::vec3 color;
-    struct {
-        float exponent;
-        glm::vec3 color;
-    } specular;
-    float hasReflective;
-    float hasRefractive;
-    float indexOfRefraction;
-    float emittance;
-};
-
 struct Camera {
     glm::ivec2 resolution;
     glm::vec3 position;
@@ -74,16 +62,4 @@ struct ShadeableIntersection {
   glm::vec3 surfaceNormal;
   glm::vec3 surfaceUV;
   int materialId;
-};
-
-
-struct AABB {
-    glm::vec3 minPos;
-    glm::vec3 maxPos;
-};
-
-struct BVH_Node {
-    AABB box;
-    int geomIdx;
-    int size;
 };
