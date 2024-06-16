@@ -142,3 +142,22 @@ __host__ __device__ float sphereIntersectionTest(Geom sphere, Ray r,
 
     return glm::length(r.origin - intersectionPoint);
 }
+
+// A caller that switches on geometry type and call actual intersection test.
+__host__ __device__ float intersectionTest(Geom geometry, Ray r,
+    glm::vec3& intersectionPoint, glm::vec3& normal, bool& outside) {
+    float t = -1.0f;
+
+    switch (geometry.type)
+    {
+    case GeomType::SPHERE:
+        t = sphereIntersectionTest(geometry, r, intersectionPoint, normal, outside);
+        break;
+    case GeomType::CUBE:
+        t = boxIntersectionTest(geometry, r, intersectionPoint, normal, outside);
+    default:
+        break;
+    }
+
+    return t;
+}

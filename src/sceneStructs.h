@@ -7,7 +7,7 @@
 
 #define BACKGROUND_COLOR (glm::vec3(0.0f))
 
-enum GeomType {
+enum class GeomType {
     SPHERE,
     CUBE,
 };
@@ -18,7 +18,7 @@ struct Ray {
 };
 
 struct Geom {
-    enum GeomType type;
+    GeomType type;
     int materialid;
     glm::vec3 translation;
     glm::vec3 rotation;
@@ -61,7 +61,7 @@ struct RenderState {
 
 struct PathSegment {
     Ray ray;
-    glm::vec3 color;
+    glm::vec3 throughput;
     int pixelIndex;
     int remainingBounces;
 };
@@ -72,5 +72,18 @@ struct PathSegment {
 struct ShadeableIntersection {
   float t;
   glm::vec3 surfaceNormal;
+  glm::vec3 surfaceUV;
   int materialId;
+};
+
+
+struct AABB {
+    glm::vec3 minPos;
+    glm::vec3 maxPos;
+};
+
+struct BVH_Node {
+    AABB box;
+    int geomIdx;
+    int size;
 };
