@@ -85,6 +85,14 @@ namespace mathUtil {
         wt = glm::normalize(-wi / ior + n * (cosIn / ior - cosTr));
         return true;
     }
+
+    __host__ __device__ inline glm::vec3 mapACES(glm::vec3 color) {
+        return (color * (color * 2.51f + 0.03f)) / (color * (color * 2.43f + 0.59f) + 0.14f);
+    }
+
+    __host__ __device__ inline glm::vec3 correctGamma(glm::vec3 color) {
+        return glm::pow(color, glm::vec3(1.f / 2.2f));
+    }
 }
 
 

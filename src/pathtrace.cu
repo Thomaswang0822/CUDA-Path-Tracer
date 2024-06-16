@@ -45,25 +45,23 @@ thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int de
 }
 
 //Kernel that writes the image to the OpenGL PBO directly.
-__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution,
-	int iter, glm::vec3* image) {
+__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image) {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
 
 	if (x < resolution.x && y < resolution.y) {
 		int index = x + (y * resolution.x);
-		glm::vec3 pix = image[index];
+		glm::vec3 colorRawAvg = image[index] / float(iter);
 
-		glm::ivec3 color;
-		color.x = glm::clamp((int)(pix.x / iter * 255.0), 0, 255);
-		color.y = glm::clamp((int)(pix.y / iter * 255.0), 0, 255);
-		color.z = glm::clamp((int)(pix.z / iter * 255.0), 0, 255);
+		// Do ACES tone mapping and Gamma correction
+		glm::vec3 colorOut = mathUtil::correctGamma(mathUtil::mapACES(colorRawAvg));
+		glm::vec3 intColor = glm::clamp(glm::ivec3(colorOut * 255.f), glm::ivec3(0.f), glm::ivec3(255.f));
 
 		// Each thread writes one pixel location in the texture (textel)
 		pbo[index].w = 0;
-		pbo[index].x = color.x;
-		pbo[index].y = color.y;
-		pbo[index].z = color.z;
+		pbo[index].x = intColor.x;
+		pbo[index].y = intColor.y;
+		pbo[index].z = intColor.z;
 	}
 }
 
