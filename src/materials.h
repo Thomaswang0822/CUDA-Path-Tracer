@@ -2,15 +2,28 @@
 
 #include "utilities.h"
 
+//struct Material {
+//    glm::vec3 color;
+//    struct {
+//        float exponent;
+//        glm::vec3 color;
+//    } specular;
+//    float hasReflective;
+//    float hasRefractive;
+//    float indexOfRefraction;
+//    float emittance;
+//};
+
 struct Material {
-    glm::vec3 color;
-    struct {
-        float exponent;
-        glm::vec3 color;
-    } specular;
-    float hasReflective;
-    float hasRefractive;
-    float indexOfRefraction;
+    enum class Type {
+        Lambertian = 0, MetallicWorkflow = 1, Dielectric = 2, Light = 3
+    };
+
+    Type type;
+    glm::vec3 baseColor;
+    float metallic;
+    float roughness;
+    float ior;
     float emittance;
 };
 

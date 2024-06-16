@@ -240,7 +240,7 @@ __global__ void shadeFakeMaterial(
 			thrust::uniform_real_distribution<float> u01(0, 1);
 
 			Material material = materials[intersection.materialId];
-			glm::vec3 materialColor = material.color;
+			glm::vec3 materialColor = material.baseColor;
 
 			// If the material indicates that the object was a light, "light" the ray
 			if (material.emittance > 0.0f) {

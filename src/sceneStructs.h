@@ -37,6 +37,8 @@ struct Camera {
     glm::vec3 right;
     glm::vec2 fov;
     glm::vec2 pixelLength;
+    float lensRadius;
+    float focalDist;
 };
 
 struct RenderState {
@@ -58,8 +60,9 @@ struct PathSegment {
 // 1) color contribution computation
 // 2) BSDF evaluation: generate a new ray
 struct ShadeableIntersection {
-  float t;
-  glm::vec3 surfaceNormal;
-  glm::vec3 surfaceUV;
-  int materialId;
+    float t;
+    glm::vec3 surfaceNormal;
+    glm::vec3 surfaceUV;
+    glm::vec3 inDir;
+    int materialId;
 };
