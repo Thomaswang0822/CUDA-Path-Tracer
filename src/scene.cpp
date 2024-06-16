@@ -128,7 +128,7 @@ int Scene::loadCamera() {
         else if (tokens[0] == "FocalDist") {
             camera.focalDist = stof(tokens[1]);
         }
-        else if (tokens[0] == "Sample") {
+        else if (tokens[0] == "Iterations") {
             state.iterations = stoi(tokens[1]);
         }
         else if (tokens[0] == "Depth") {

@@ -38,12 +38,6 @@ void checkCUDAErrorFn(const char* msg, const char* file, int line) {
 #endif
 }
 
-__host__ __device__
-thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth) {
-	int h = utilhash((1 << 31) | (depth << 22) | iter) ^ utilhash(index);
-	return thrust::default_random_engine(h);
-}
-
 //Kernel that writes the image to the OpenGL PBO directly.
 __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image) {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
@@ -233,11 +227,8 @@ __global__ void shadeFakeMaterial(
 	{
 		ShadeableIntersection intersection = shadeableIntersections[idx];
 		if (intersection.t > 0.0f) { // if the intersection exists...
-		  // Set up the RNG
-		  // LOOK: this is how you use thrust's RNG! Please look at
-		  // makeSeededRandomEngine as well.
-			thrust::default_random_engine rng = makeSeededRandomEngine(iter, idx, 0);
-			thrust::uniform_real_distribution<float> u01(0, 1);
+			// Set up the Sampler
+			Sampler sampler(iter, idx, 0);
 
 			Material material = materials[intersection.materialId];
 			glm::vec3 materialColor = material.baseColor;
@@ -252,7 +243,7 @@ __global__ void shadeFakeMaterial(
 			else {
 				float lightTerm = glm::dot(intersection.surfaceNormal, glm::vec3(0.0f, 1.0f, 0.0f));
 				pathSegments[idx].throughput *= (materialColor * lightTerm) * 0.3f + ((1.0f - intersection.t * 0.02f) * materialColor) * 0.7f;
-				pathSegments[idx].throughput *= u01(rng); // apply some noise because why not
+				pathSegments[idx].throughput *= sampler.sample1D(); // apply some noise because why not
 			}
 		}
 		else {

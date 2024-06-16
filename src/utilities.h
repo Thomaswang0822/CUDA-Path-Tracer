@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "mathUtility.h"
+#include "sampler.h"
 
 class GuiDataContainer
 {

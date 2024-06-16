@@ -49,7 +49,7 @@ Resolution	800 800
 FovY        45
 LensRadius	0
 FocalDist	1
-Sample		5000
+Iterations	5000
 Depth		8
 File        Cornell
 Eye         0.0 5 10.5
