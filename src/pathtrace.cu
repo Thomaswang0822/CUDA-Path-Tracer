@@ -60,6 +60,7 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
 	}
 }
 
+#define PixelIdxForTerminated -1
 static Scene* hst_scene = NULL;
 static GuiDataContainer* guiData = NULL;
 static glm::vec3* dev_image = NULL;
@@ -212,6 +213,8 @@ __global__ void computeIntersections(
 			intersections[path_index].t = t_min;
 			intersections[path_index].materialId = geoms[hit_geom_index].materialid;
 			intersections[path_index].surfaceNormal = normal;
+			intersections[path_index].position = intersect_point;
+			intersections[path_index].inDir = -pathSegment.ray.direction;
 		}
 	}
 }
@@ -281,6 +284,7 @@ __global__ void shadeSegment(
 	Intersection intersec = intersections[idx];
 	if (intersec.t < 0) {
 		//segments[idx].throughput = glm::vec3(0.0f);
+		segments[idx].pixelIndex = PixelIdxForTerminated;
 		return;
 	}
 
