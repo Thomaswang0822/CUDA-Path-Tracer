@@ -127,14 +127,16 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 		int index = x + (y * cam.resolution.x);
 		PathSegment& segment = pathSegments[index];
 
-		segment.ray.origin = cam.position;
+		//segment.ray.origin = cam.position;
 		segment.throughput = glm::vec3(1.0f, 1.0f, 1.0f);
 
-		// TODO: implement antialiasing by jittering the ray
-		segment.ray.direction = glm::normalize(cam.view
+		// antialiasing by jittering the ray
+		/*segment.ray.direction = glm::normalize(cam.view
 			- cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f)
 			- cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f)
-		);
+		);*/
+		Sampler sampler(iter, index, 0);
+		cam.generateCameraRay(segment.ray, x, y, sampler.sample2D());
 
 		segment.pixelIndex = index;
 		segment.remainingBounces = traceDepth;
