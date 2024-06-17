@@ -6,6 +6,14 @@
 struct Ray {
     glm::vec3 origin;
     glm::vec3 direction;
+
+    /**
+     * Used on PathSegment.ray: update to next (sampled direction) ray.
+     */
+    __host__ __device__ inline void nextRay(glm::vec3 pos, glm::vec3 dir) {
+        direction = dir;
+        origin = pos + EPSILON * dir;
+    }
 };
 
 struct Camera {

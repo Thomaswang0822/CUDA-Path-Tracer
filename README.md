@@ -13,7 +13,7 @@ It is forked from the starter code of [**University of Pennsylvania, CIS 565: GP
 
 Since I have learned and (painfully) debugged those low-level interfaces in a past class project, it's more efficient to use someone else's code.
 
-The primary reference code I used is by [@HummaWhite](https://github.com/CIS565-Fall-2023/Project3-CUDA-Path-Tracer).
+The primary reference code I used is by [@HummaWhite](https://github.com/HummaWhite/Project3-CUDA-Path-Tracer).
 
 For code irrelevant to CUDA, I mostly copy after understanding them. For CUDA-related code, I spent more time worship the technical beauty.
 The parallizable BVH is the biggest reason I picked this repo as my reference.

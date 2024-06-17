@@ -9,6 +9,7 @@
 // define const MACROS here
 #define PI                3.1415926535897932384626422832795028841971f
 #define TWO_PI            6.2831853071795864769252867665590057683943f
+#define INV_PI            0.3183098861837906912164442019275156781077f
 #define SQRT_OF_ONE_THIRD 0.5773502691896257645091487805019574556476f
 #define EPSILON           0.00001f
 
@@ -67,11 +68,11 @@ namespace mathUtil {
      * @return bool True if refraction occurs, false if total internal reflection occurs.
      */
     __device__ static bool refract(glm::vec3 n, glm::vec3 wi, float ior, glm::vec3& wt) {
-        float cosIn = glm::min(glm::dot(n, wi), 1.f);
+        float cosIn = glm::dot(n, wi);
         if (cosIn < 0) {  // internal ray: reverse 1. ior; 2. out angle
             ior = 1.f / ior;
         }
-        float sin2In = 1.f - cosIn * cosIn;
+        float sin2In = glm::max(0.f, 1.f - cosIn * cosIn);
         float sin2Tr = sin2In / (ior * ior);  // Snell's Law
 
         if (sin2Tr >= 1.f) {  // total internal refelction

@@ -36,6 +36,7 @@ struct RenderState {
 struct PathSegment {
     Ray ray;
     glm::vec3 throughput;
+    glm::vec3 radiance;
     int pixelIndex;
     int remainingBounces;
 };
@@ -43,10 +44,23 @@ struct PathSegment {
 // Use with a corresponding PathSegment to do:
 // 1) color contribution computation
 // 2) BSDF evaluation: generate a new ray
-struct ShadeableIntersection {
-    float t;
+struct Intersection {
+    float t;  // hitting distance of current ray
+    glm::vec3 position;
     glm::vec3 surfaceNormal;
     glm::vec3 surfaceUV;
     glm::vec3 inDir;
     int materialId;
+};
+
+struct CompactTerminatedPaths {
+    __host__ __device__ bool operator() (const PathSegment& segment) {
+        return !(segment.pixelIndex >= 0 && segment.remainingBounces == 0);
+    }
+};
+
+struct RemoveInvalidPaths {
+    __host__ __device__ bool operator() (const PathSegment& segment) {
+        return segment.pixelIndex < 0 || segment.remainingBounces == 0;
+    }
 };
