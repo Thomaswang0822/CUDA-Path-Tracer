@@ -341,7 +341,7 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
  * of memory management
  */
 void pathtrace(uchar4* pbo, int frame, int iter) {
-	
+
 	const int traceDepth = hst_scene->state.traceDepth;
 	const Camera& cam = hst_scene->state.camera;
 	const int pixelcount = cam.resolution.x * cam.resolution.y;
@@ -391,8 +391,11 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 	checkCUDAError("generate camera ray");
 
 	int depth = 0;
-	PathSegment* dev_path_end = dev_paths + pixelcount;
-	int num_paths = dev_path_end - dev_paths;
+	int num_paths = pixelcount;
+
+	/// @note With stream compaction, dev_terminated_paths_thr points to the start of terminated paths data.
+	/// And we also need a running pointer that, for each iteration, gives the next clean memory address
+	auto next_terminated_paths_thr = dev_terminated_paths_thr;
 
 	// --- PathSegment Tracing Stage ---
 	// Shoot ray into scene, bounce between objects, push shading chunks
@@ -412,7 +415,7 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 			, dev_geoms
 			, hst_scene->geoms.size()
 			, dev_intersections
-		);
+			);
 		checkCUDAError("trace one bounce");
 		cudaDeviceSynchronize();
 		depth++;
@@ -428,8 +431,25 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 
 		//shadeFakeMaterial <<<numblocksPathSegmentTracing, blockSize1d>>> (iter, num_paths, dev_intersections, dev_paths, dev_materials);
 		shadeSegment << <numblocksPathSegmentTracing, blockSize1d >> > (iter, num_paths, dev_intersections, dev_paths, dev_materials);
-		iterationComplete = true; // TODO: should be based off stream compaction results.
-		iterationComplete = bool(depth > 10);
+
+		/**
+		 * @brief Compact paths that are terminated but carry contribution into a separate buffer.
+		 * It copies to next_terminated_paths_thr and advance it to next clean memory address, but dev_paths_thr isn't shortened.
+		 * 
+		 * @see https://nvidia.github.io/cccl/thrust/api/function_group__stream__compaction_1gaeec02acfde68e411ca7d09063241f4d7.html#thrust-remove-copy-if.
+		 */
+		next_terminated_paths_thr = thrust::remove_copy_if(dev_paths_thr, dev_paths_thr + num_paths, next_terminated_paths_thr, CompactTerminatedPaths());
+		// Remove paths that yield no contribution
+		/**
+		 * @brief Remove paths that yield no contribution.
+		 * 
+		 * @see https://nvidia.github.io/cccl/thrust/api/function_group__stream__compaction_1gaf01d45b30fecba794afae065d625f94f.html#thrust-remove-if
+		 */
+		auto dev_paths_thr_new_end = thrust::remove_if(dev_paths_thr, dev_paths_thr + num_paths, RemoveInvalidPaths());
+		num_paths = dev_paths_thr_new_end - dev_paths_thr;
+		//std::cout << "Remaining paths: " << num_paths << "\n";
+
+		iterationComplete = bool(num_paths == 0);
 
 		if (guiData != NULL)
 		{
@@ -439,7 +459,8 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 
 	// Assemble this iteration and apply it to the image
 	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-	finalGather <<<numBlocksPixels, blockSize1d>>> (num_paths, dev_image, dev_paths);
+	int numEffectivePaths = next_terminated_paths_thr.get() - dev_terminated_paths;
+	finalGather << <numBlocksPixels, blockSize1d >> > (numEffectivePaths, dev_image, dev_terminated_paths);
 
 	///////////////////////////////////////////////////////////////////////////
 
