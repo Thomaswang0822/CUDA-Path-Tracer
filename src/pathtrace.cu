@@ -61,18 +61,17 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
 }
 
 #define PixelIdxForTerminated -1
-static Scene* hst_scene = NULL;
-static GuiDataContainer* guiData = NULL;
-static glm::vec3* dev_image = NULL;
-static Geom* dev_geoms = NULL;
-static Material* dev_materials = NULL;
-static PathSegment* dev_paths = NULL;
-static Intersection* dev_intersections = NULL;
-// TODO: static variables for device memory, any extra info you need, etc
+static Scene* hst_scene = nullptr;
+static GuiDataContainer* guiData = nullptr;
+static glm::vec3* dev_image = nullptr;
+static Geom* dev_geoms = nullptr;
+static Material* dev_materials = nullptr;
+static Intersection* dev_intersections = nullptr;
 // One for running kernels, the other for storage
-static PathSegment* dev_terminated_paths = nullptr;
-static thrust::device_ptr<PathSegment> dev_paths_thr;
-static thrust::device_ptr<PathSegment> dev_terminated_paths_thr;
+static PathSegment* paths_alive = nullptr;
+static PathSegment* paths_done = nullptr;
+static thrust::device_ptr<PathSegment> thr_paths_alive;
+static thrust::device_ptr<PathSegment> thr_paths_done;
 
 void InitDataContainer(GuiDataContainer* imGuiData)
 {
@@ -88,10 +87,10 @@ void pathtraceInit(Scene* scene) {
 	cudaMalloc(&dev_image, pixelcount * sizeof(glm::vec3));
 	cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
 
-	cudaMalloc(&dev_paths, pixelcount * sizeof(PathSegment));
-	dev_paths_thr = thrust::device_ptr<PathSegment>(dev_paths);
-	cudaMalloc(&dev_terminated_paths, pixelcount * sizeof(PathSegment));
-	dev_terminated_paths_thr = thrust::device_ptr<PathSegment>(dev_terminated_paths);
+	cudaMalloc(&paths_alive, pixelcount * sizeof(PathSegment));
+	thr_paths_alive = thrust::device_ptr<PathSegment>(paths_alive);
+	cudaMalloc(&paths_done, pixelcount * sizeof(PathSegment));
+	thr_paths_done = thrust::device_ptr<PathSegment>(paths_done);
 
 	cudaMalloc(&dev_geoms, scene->geoms.size() * sizeof(Geom));
 	cudaMemcpy(dev_geoms, scene->geoms.data(), scene->geoms.size() * sizeof(Geom), cudaMemcpyHostToDevice);
@@ -109,13 +108,12 @@ void pathtraceInit(Scene* scene) {
 
 void pathtraceFree() {
 	cudaFree(dev_image);  // no-op if dev_image is null
-	cudaFree(dev_paths);
+	cudaFree(paths_alive);
+	cudaFree(paths_done);
 	cudaFree(dev_geoms);
 	cudaFree(dev_materials);
 	cudaFree(dev_intersections);
-	// TODO: clean up any extra device memory you created
-	cudaFree(dev_terminated_paths);
-
+	
 	checkCUDAError("pathtraceFree");
 }
 
@@ -387,15 +385,17 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 
 	// TODO: perform one iteration of path tracing
 
-	generateRayFromCamera <<<blocksPerGrid2d, blockSize2d>>> (cam, iter, traceDepth, dev_paths);
+	generateRayFromCamera <<<blocksPerGrid2d, blockSize2d>>> (cam, iter, traceDepth, paths_alive);
 	checkCUDAError("generate camera ray");
 
+	// increment each iteration
 	int depth = 0;
 	int num_paths = pixelcount;
 
-	/// @note With stream compaction, dev_terminated_paths_thr points to the start of terminated paths data.
-	/// And we also need a running pointer that, for each iteration, gives the next clean memory address
-	auto next_terminated_paths_thr = dev_terminated_paths_thr;
+	/// @note With stream compaction, thr_paths_done points to the start of terminated paths data.
+	/// And we also need a running pointer that gives the next clean memory address,
+	/// which enables more data being written in the next iteration.
+	auto next_thr_paths_done = thr_paths_done;
 
 	// --- PathSegment Tracing Stage ---
 	// Shoot ray into scene, bounce between objects, push shading chunks
@@ -409,49 +409,53 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 		// tracing
 		dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
 		computeIntersections <<<numblocksPathSegmentTracing, blockSize1d>>> (
-			depth
-			, num_paths
-			, dev_paths
-			, dev_geoms
-			, hst_scene->geoms.size()
-			, dev_intersections
-			);
+			depth,
+			num_paths,
+			paths_alive,
+			dev_geoms,
+			hst_scene->geoms.size(),
+			dev_intersections
+		);
 		checkCUDAError("trace one bounce");
 		cudaDeviceSynchronize();
 		depth++;
 
-		// TODO:
 		// --- Shading Stage ---
 		// Shade path segments based on intersections and generate new rays by
 		// evaluating the BSDF.
+		// TODO:
 		// Start off with just a big kernel that handles all the different
 		// materials you have in the scenefile.
-		// TODO: compare between directly shading the path segments and shading
-		// path segments that have been reshuffled to be contiguous in memory.
 
-		//shadeFakeMaterial <<<numblocksPathSegmentTracing, blockSize1d>>> (iter, num_paths, dev_intersections, dev_paths, dev_materials);
-		shadeSegment << <numblocksPathSegmentTracing, blockSize1d >> > (iter, num_paths, dev_intersections, dev_paths, dev_materials);
+		//shadeFakeMaterial <<<numblocksPathSegmentTracing, blockSize1d>>> (iter, num_paths, dev_intersections, paths_alive, dev_materials);
+		shadeSegment << <numblocksPathSegmentTracing, blockSize1d >> > (
+			iter, 
+			num_paths, 
+			dev_intersections, 
+			paths_alive, 
+			dev_materials
+		);
 
 		/**
 		 * @brief Compact paths that are terminated but carry contribution into a separate buffer.
-		 * It copies to next_terminated_paths_thr and advance it to next clean memory address, but dev_paths_thr isn't shortened.
+		 * It copies to next_thr_paths_done and advance it to next clean memory address, but thr_paths_alive isn't shortened.
 		 * 
 		 * @see https://nvidia.github.io/cccl/thrust/api/function_group__stream__compaction_1gaeec02acfde68e411ca7d09063241f4d7.html#thrust-remove-copy-if.
 		 */
-		next_terminated_paths_thr = thrust::remove_copy_if(dev_paths_thr, dev_paths_thr + num_paths, next_terminated_paths_thr, CompactTerminatedPaths());
+		next_thr_paths_done = thrust::remove_copy_if(thr_paths_alive, thr_paths_alive + num_paths, next_thr_paths_done, CompactTerminatedPaths());
 		// Remove paths that yield no contribution
 		/**
 		 * @brief Remove paths that yield no contribution.
 		 * 
 		 * @see https://nvidia.github.io/cccl/thrust/api/function_group__stream__compaction_1gaf01d45b30fecba794afae065d625f94f.html#thrust-remove-if
 		 */
-		auto dev_paths_thr_new_end = thrust::remove_if(dev_paths_thr, dev_paths_thr + num_paths, RemoveInvalidPaths());
-		num_paths = dev_paths_thr_new_end - dev_paths_thr;
+		auto thr_paths_alive_end = thrust::remove_if(thr_paths_alive, thr_paths_alive + num_paths, RemoveInvalidPaths());
+		num_paths = thr_paths_alive_end - thr_paths_alive;
 		//std::cout << "Remaining paths: " << num_paths << "\n";
 
 		iterationComplete = bool(num_paths == 0);
 
-		if (guiData != NULL)
+		if (guiData != nullptr)
 		{
 			guiData->TracedDepth = depth;
 		}
@@ -459,8 +463,8 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 
 	// Assemble this iteration and apply it to the image
 	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-	int numEffectivePaths = next_terminated_paths_thr.get() - dev_terminated_paths;
-	finalGather << <numBlocksPixels, blockSize1d >> > (numEffectivePaths, dev_image, dev_terminated_paths);
+	int numEffectivePaths = next_thr_paths_done.get() - paths_done;
+	finalGather << <numBlocksPixels, blockSize1d >> > (numEffectivePaths, dev_image, paths_done);
 
 	///////////////////////////////////////////////////////////////////////////
 
