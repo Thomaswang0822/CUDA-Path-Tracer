@@ -429,6 +429,7 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 		//shadeFakeMaterial <<<numblocksPathSegmentTracing, blockSize1d>>> (iter, num_paths, dev_intersections, dev_paths, dev_materials);
 		shadeSegment << <numblocksPathSegmentTracing, blockSize1d >> > (iter, num_paths, dev_intersections, dev_paths, dev_materials);
 		iterationComplete = true; // TODO: should be based off stream compaction results.
+		iterationComplete = bool(depth > 10);
 
 		if (guiData != NULL)
 		{
