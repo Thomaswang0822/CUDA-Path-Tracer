@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
 void saveImage() {
 	float samples = iteration;
 	// output image file
-	image img(width, height);
+	Image img(width, height);
 
 	for (int x = 0; x < width; x++) {
 		for (int y = 0; y < height; y++) {

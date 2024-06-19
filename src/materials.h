@@ -140,6 +140,9 @@ __device__ static float ggxPdf(glm::vec3 n, glm::vec3 m, glm::vec3 wo, float alp
 * This reduces invalid samples and make pdf values at grazing angles more stable
 * See [Sampling the GGX Distribution of Visible Normals, Eric Heitz, JCGT 2018]:
 * https://jcgt.org/published/0007/04/01/
+* 
+* @see https://github.com/Thomaswang0822/lajolla_renderer/blob/main/src/microfacet.h#L131
+* to implement anisotropic version
 */
 __device__ static glm::vec3 ggxSample(glm::vec3 n, glm::vec3 wo, float alpha, glm::vec2 r) {
     glm::mat3 transMat = mathUtil::localRefMatrix(n);

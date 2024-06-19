@@ -41,20 +41,41 @@ namespace mathUtil {
     }
 
     __device__ static glm::mat3 localRefMatrix(glm::vec3 n) {
-        glm::vec3 t = (glm::abs(n.z) > 0.999f) ? glm::vec3(0.f, 1.f, 0.f) : glm::vec3(0.f, 0.f, 1.f);
+        glm::vec3 t = (glm::abs(n.y) > 0.9f) ? glm::vec3(0.f, 0.f, 1.f) : glm::vec3(0.f, 1.f, 0.f);
         glm::vec3 b = glm::cross(n, t);
         t = glm::cross(b, n);
         return glm::mat3(t, b, n);
     }
 
     __device__ static glm::vec3 localToWorld(glm::vec3 n, glm::vec3 v) {
-        return glm::normalize(localRefMatrix(n) * v);
+        // build an orthonormal basis (tan, bitan, normal)
+        glm::vec3 _some = (glm::abs(n.y) > 0.9f) ? glm::vec3(0.f, 0.f, 1.f) : glm::vec3(0.f, 1.f, 0.f);
+        glm::vec3 t = glm::normalize(glm::cross(n, _some));
+        glm::vec3 b = glm::cross(n, t);
+        //// Eq to 
+        //glm::vec3 b = glm::cross(n, _some);
+        //glm::vec3 t = glm::cross(b, n);
+
+        return glm::normalize(glm::vec3(t * v.x + b * v.y + n * v.z));
     }
 
-    __device__ static glm::vec3 sampleHemisphereCosine(glm::vec3 n, float rx, float ry) {
-        glm::vec2 d = toUnitDisk(rx, ry);
+    /**
+     * @see https://ameye.dev/notes/sampling-the-hemisphere/#cosine-weighted-hemisphere.
+     */
+    __device__ static glm::vec3 sampleHemisphereCosine(glm::vec3 n, float u1, float u2) {
+        /*glm::vec2 d = toUnitDisk(rx, ry);
         float z = glm::sqrt(1.f - glm::dot(d, d));
-        return localToWorld(n, glm::vec3(d, z));
+        return localToWorld(n, glm::vec3(d, z));*/
+
+        // compute the local {cos(phi)*sin(theta), sin(phi)*sin(theta), cos(theta)}
+        float sin_theta = sqrt(1.f - u2);  // float cos_theta = sqrt(u2);
+        float phi = TWO_PI * u1;
+        glm::vec3 local_dir(
+            cos(phi) * sin_theta,
+            sin(phi) * sin_theta,
+            sqrt(u2)
+        );
+        return localToWorld(n, local_dir);
     }
 
     /**
