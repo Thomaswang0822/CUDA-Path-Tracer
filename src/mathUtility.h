@@ -4,6 +4,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <vector>
 
 
 // define const MACROS here
@@ -114,6 +115,11 @@ namespace mathUtil {
 
     __host__ __device__ inline glm::vec3 correctGamma(glm::vec3 color) {
         return glm::pow(color, glm::vec3(1.f / 2.2f));
+    }
+
+    template<typename T>
+    size_t byteSizeOfVector(const std::vector<T>& v) {
+        return v.size() * sizeof(T);
     }
 }
 

@@ -12,15 +12,17 @@
 #include "TinyObjLoader/tiny_obj_loader.h"
 #include "bvh.h"
 #include "image.h"
+#include "texture.h"
 
 #define ABS_SCENES_PATH "D:/Code/CUDA-Path-Tracer/scenes"
-#define INDEXED_MESH_DATA false
+#define MESH_DATA_STRUCT_OF_ARRAY false
+#define MESH_DATA_INDEXED false
 
-struct Model {
+struct MeshData {
     std::vector<glm::vec3> vertices;
     std::vector<glm::vec3> normals;
     std::vector<glm::vec2> texcoords;
-#if INDEXED_MESH_DATA
+#if MESH_DATA_INDEXED
     std::vector<glm::ivec3> indices;
 #endif
 };
@@ -35,22 +37,39 @@ struct ModelInstance {
     glm::mat3 normalMat;
 
     int materialId;
-    Model* meshData;
+    MeshData* meshData;
 };
 
 class Resource {
 private:
-    static std::map<std::string, Model*> modelPool;
+    static std::map<std::string, MeshData*> meshDataPool;
     static std::map<std::string, Image*> texturePool;
     static std::filesystem::path scenes_path;
 
 public:
-    static Model* loadModel(const std::string& filename);
+    // A caller loading different types of mesh format
+    static MeshData* loadModelMeshData(const std::string& filename);
+    static MeshData* loadOBJMesh(const std::string& filename);
+    static MeshData* loadGLTFMesh(const std::string& filename);
+    
     static Image* loadTexture(const std::string& filename);
 
     static void clear();
 };
 
+struct DevResource {
+    glm::vec3* devVertices = nullptr;
+    glm::vec3* devNormals = nullptr;
+    glm::vec2* devTexcoords = nullptr;
+    AABB* devBoundingBoxes = nullptr;
+    MTBVHNode* devBVHNodes[6] = { nullptr };
+    int BVHSize;
+
+    int* devMaterialIds = nullptr;
+    Material* devMaterials = nullptr;
+    glm::vec3* devTextureData = nullptr;
+    DevTextureObj* devTextureObjs = nullptr;
+};
 
 class Scene {
 private:
@@ -74,20 +93,11 @@ public:
     std::vector<Material> materials;
     std::map<std::string, int> materialMap;
 
-    std::vector<glm::vec3> vertices;
-    std::vector<glm::vec3> normals;
-    std::vector<glm::vec3> texcoords;
-#if INDEXED_MESH_DATA
-    std::vector<glm::ivec3> indices;
-#endif
+    std::vector<int> materialIds;
+    int BVHSize;
+    std::vector<AABB> boundingBoxes;
+    std::vector<std::vector<MTBVHNode>> BVHNodes;
+    MeshData meshData;
 
-    glm::vec3* devVertices = nullptr;
-    glm::vec3* devNormals = nullptr;
-    glm::vec3* devTexcoords = nullptr;
-#if INDEXED_MESH_DATA
-    glm::ivec3* devIndices = nullptr;
-#endif
-    AABB* devBoundingBoxes = nullptr;
-    glm::vec3* devMaterials = nullptr;
-    glm::vec3* devTexture = nullptr;
+    DevResource devResources;
 };

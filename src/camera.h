@@ -14,6 +14,11 @@ struct Ray {
         direction = dir;
         origin = pos + EPSILON * dir;
     }
+
+    /** Get a point at certain distance */
+    __host__ __device__ inline glm::vec3 getPoint(float t) const {
+        return origin + direction * t;
+    }
 };
 
 struct Camera {
