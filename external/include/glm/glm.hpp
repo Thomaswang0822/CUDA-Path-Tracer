@@ -135,3 +135,6 @@
 #include "matrix.hpp"
 #include "vector_relational.hpp"
 #include "integer.hpp"
+
+/// otherwise build failed
+#define GLM_ENABLE_EXPERIMENTAL
