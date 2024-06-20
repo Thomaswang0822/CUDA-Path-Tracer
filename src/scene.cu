@@ -271,7 +271,7 @@ void Scene::loadCamera() {
         else if (tokens[0] == "FocalDist") {
             camera.focalDist = stof(tokens[1]);
         }
-        else if (tokens[0] == "Iterations") {
+        else if (tokens[0] == "Sample") {
             state.iterations = stoi(tokens[1]);
         }
         else if (tokens[0] == "Depth") {
@@ -429,7 +429,7 @@ __device__ int DevScene::getMTBVHId(glm::vec3 dir) {
     glm::vec3 absDir = glm::abs(dir);
     if (absDir.x > absDir.y) {
         if (absDir.x > absDir.z) {
-            return dir.x > 0 ? 1 : 0;
+            return dir.x > 0 ? 0 : 1;
         }
         else {
             return dir.z > 0 ? 4 : 5;
