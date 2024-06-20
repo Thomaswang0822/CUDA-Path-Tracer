@@ -24,4 +24,8 @@ public:
     size_t byteSize() {
         return sizeof(glm::vec3) * xSize * ySize;
     }
+
+    glm::vec3* data() const {
+        return pixels;
+    }
 };

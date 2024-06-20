@@ -15,29 +15,6 @@
 #include "intersections.h"
 #include "interactions.h"
 
-#define ERRORCHECK 1
-
-#define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
-#define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
-void checkCUDAErrorFn(const char* msg, const char* file, int line) {
-#if ERRORCHECK
-	cudaDeviceSynchronize();
-	cudaError_t err = cudaGetLastError();
-	if (cudaSuccess == err) {
-		return;
-	}
-
-	fprintf(stderr, "CUDA error");
-	if (file) {
-		fprintf(stderr, " (%s:%d)", file, line);
-	}
-	fprintf(stderr, ": %s: %s\n", msg, cudaGetErrorString(err));
-#  ifdef _WIN32
-	getchar();
-#  endif
-	exit(EXIT_FAILURE);
-#endif
-}
 
 //Kernel that writes the image to the OpenGL PBO directly.
 __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image) {
@@ -64,8 +41,6 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
 static Scene* hst_scene = nullptr;
 static GuiDataContainer* guiData = nullptr;
 static glm::vec3* dev_image = nullptr;
-static Geom* dev_geoms = nullptr;
-static Material* dev_materials = nullptr;
 static Intersection* dev_intersections = nullptr;
 // One for running kernels, the other for storage
 static PathSegment* paths_alive = nullptr;
@@ -92,16 +67,8 @@ void pathtraceInit(Scene* scene) {
 	cudaMalloc(&paths_done, pixelcount * sizeof(PathSegment));
 	thr_paths_done = thrust::device_ptr<PathSegment>(paths_done);
 
-	cudaMalloc(&dev_geoms, scene->geoms.size() * sizeof(Geom));
-	cudaMemcpy(dev_geoms, scene->geoms.data(), scene->geoms.size() * sizeof(Geom), cudaMemcpyHostToDevice);
-
-	cudaMalloc(&dev_materials, scene->materials.size() * sizeof(Material));
-	cudaMemcpy(dev_materials, scene->materials.data(), scene->materials.size() * sizeof(Material), cudaMemcpyHostToDevice);
-
 	cudaMalloc(&dev_intersections, pixelcount * sizeof(Intersection));
 	cudaMemset(dev_intersections, 0, pixelcount * sizeof(Intersection));
-
-	// TODO: initialize any extra device memeory you need
 
 	checkCUDAError("pathtraceInit");
 }
@@ -110,8 +77,6 @@ void pathtraceFree() {
 	cudaFree(dev_image);  // no-op if dev_image is null
 	cudaFree(paths_alive);
 	cudaFree(paths_done);
-	cudaFree(dev_geoms);
-	cudaFree(dev_materials);
 	cudaFree(dev_intersections);
 	
 	checkCUDAError("pathtraceFree");
@@ -159,8 +124,7 @@ __global__ void computeIntersections(
 	int depth
 	, int num_paths
 	, PathSegment* pathSegments
-	, Geom* geoms
-	, int geoms_size
+	, DevScene* scene
 	, Intersection* intersections
 )
 {
@@ -168,52 +132,9 @@ __global__ void computeIntersections(
 
 	int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 
-	if (path_index < num_paths)
-	{
+	if (path_index < num_paths) {
 		PathSegment pathSegment = pathSegments[path_index];
-
-		float t;
-		glm::vec3 intersect_point;
-		glm::vec3 normal;
-		float t_min = FLT_MAX;
-		int hit_geom_index = -1;
-		bool outside = true;
-
-		glm::vec3 tmp_intersect;
-		glm::vec3 tmp_normal;
-
-		// naive parse through global geoms
-
-		for (int i = 0; i < geoms_size; i++)
-		{
-			Geom& geom = geoms[i];
-
-			t = intersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
-
-			// Compute the minimum t from the intersection tests to determine what
-			// scene geometry object was hit first.
-			if (t > 0.0f && t_min > t)
-			{
-				t_min = t;
-				hit_geom_index = i;
-				intersect_point = tmp_intersect;
-				normal = tmp_normal;
-			}
-		}
-
-		if (hit_geom_index == -1)
-		{
-			intersections[path_index].t = -1.0f;
-		}
-		else
-		{
-			//The ray hits something
-			intersections[path_index].t = t_min;
-			intersections[path_index].materialId = geoms[hit_geom_index].materialid;
-			intersections[path_index].surfaceNormal = normal;
-			intersections[path_index].position = intersect_point;
-			intersections[path_index].inDir = -pathSegment.ray.direction;
-		}
+		scene->intersect(pathSegment.ray, intersections[path_index]);
 	}
 }
 
@@ -238,7 +159,7 @@ __global__ void shadeFakeMaterial(
 	if (idx < num_paths)
 	{
 		Intersection intersection = intersections[idx];
-		if (intersection.t > 0.0f) { // if the intersection exists...
+		if (intersection.primitive == NullPrimitive) { // if the intersection exists...
 			// Set up the Sampler
 			Sampler sampler(iter, idx, 0);
 
@@ -253,8 +174,8 @@ __global__ void shadeFakeMaterial(
 			// like what you would expect from shading in a rasterizer like OpenGL.
 			// TODO: replace this! you should be able to start with basically a one-liner
 			else {
-				float lightTerm = glm::dot(intersection.surfaceNormal, glm::vec3(0.0f, 1.0f, 0.0f));
-				pathSegments[idx].throughput *= (materialColor * lightTerm) * 0.3f + ((1.0f - intersection.t * 0.02f) * materialColor) * 0.7f;
+				float lightTerm = glm::dot(intersection.normal, glm::vec3(0.0f, 1.0f, 0.0f));
+				pathSegments[idx].throughput *= (materialColor * lightTerm) * 0.3f + ((1.0f - intersection.materialId * 0.02f) * materialColor) * 0.7f;
 				pathSegments[idx].throughput *= sampler.sample1D(); // apply some noise because why not
 			}
 		}
@@ -273,25 +194,26 @@ __global__ void shadeSegment(
 	int numPaths,
 	Intersection* intersections,
 	PathSegment* segments,
-	Material* materials
+	DevScene* scene
 ) {
 	int idx = blockDim.x * blockIdx.x + threadIdx.x;
 	if (idx >= numPaths) {
 		return;
 	}
 	Intersection intersec = intersections[idx];
-	if (intersec.t < 0) {
+	if (intersec.primitive == NullPrimitive) {
 		//segments[idx].throughput = glm::vec3(0.0f);
 		segments[idx].pixelIndex = PixelIdxForTerminated;
 		return;
 	}
 
 	Sampler sampler(iter, idx, segments[idx].remainingBounces);
-	Material material = materials[intersec.materialId];
+	Material material = scene->devMaterials[intersec.materialId];
 	PathSegment& segment = segments[idx];
 
 	// TODO
 	// Perform light area sampling and MIS
+	//segment.radiance = material.baseColor;
 
 	if (material.type == Material::Type::Light) {
 		// TODO
@@ -303,7 +225,7 @@ __global__ void shadeSegment(
 	}
 	else {
 		BSDFSample sample;
-		materialSample(intersec.surfaceNormal, intersec.inDir, material, sampler.sample3D(), sample);
+		materialSample(intersec.normal, intersec.inDir, material, sampler.sample3D(), sample);
 
 		if (sample.type == BSDFSampleType::Invalid) {
 			// Terminate path if sampling fails
@@ -312,7 +234,7 @@ __global__ void shadeSegment(
 		else {
 			bool isSampleDelta = (sample.type & BSDFSampleType::Specular);
 			segment.throughput *= sample.bsdf / sample.pdf *
-				(isSampleDelta ? 1.f : mathUtil::absDot(intersec.surfaceNormal, sample.dir));
+				(isSampleDelta ? 1.f : mathUtil::absDot(intersec.normal, sample.dir));
 			segment.ray.nextRay(intersec.position, sample.dir);
 			segment.remainingBounces--;
 		}
@@ -386,7 +308,8 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 	// TODO: perform one iteration of path tracing
 
 	generateRayFromCamera <<<blocksPerGrid2d, blockSize2d>>> (cam, iter, traceDepth, paths_alive);
-	checkCUDAError("generate camera ray");
+	checkCUDAError("generateRayFromCamera");
+	cudaDeviceSynchronize();
 
 	// increment each iteration
 	int depth = 0;
@@ -411,12 +334,11 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 		computeIntersections <<<numblocksPathSegmentTracing, blockSize1d>>> (
 			depth,
 			num_paths,
-			paths_alive,
-			dev_geoms,
-			hst_scene->geoms.size(),
+			paths_alive,  // PathSegment*
+			hst_scene->devScene,
 			dev_intersections
 		);
-		checkCUDAError("trace one bounce");
+		checkCUDAError("computeIntersections");
 		cudaDeviceSynchronize();
 		depth++;
 
@@ -433,8 +355,10 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 			num_paths, 
 			dev_intersections, 
 			paths_alive, 
-			dev_materials
+			hst_scene->devScene
 		);
+		checkCUDAError("shadeSegment");
+		cudaDeviceSynchronize();
 
 		/**
 		 * @brief Compact paths that are terminated but carry contribution into a separate buffer.

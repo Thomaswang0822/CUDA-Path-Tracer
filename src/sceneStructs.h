@@ -49,10 +49,11 @@ struct PathSegment {
 // 1) color contribution computation
 // 2) BSDF evaluation: generate a new ray
 struct Intersection {
-    float t;  // hitting distance of current ray
+    //float t;  // hitting distance of current ray
+    int primitive;
     glm::vec3 position;
-    glm::vec3 surfaceNormal;
-    glm::vec3 surfaceUV;
+    glm::vec3 normal;
+    glm::vec2 texcoord;
     glm::vec3 inDir;
     int materialId;
 };

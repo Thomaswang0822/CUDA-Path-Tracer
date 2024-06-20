@@ -110,3 +110,9 @@ std::istream& utilityCore::safeGetline(std::istream& is, std::string& t) {
         }
     }
 }
+
+static std::string utilityCore::vec3ToString(const glm::vec3& vec) {
+    std::stringstream ss;
+    ss << "{ x = " << vec.x << ", y = " << vec.y << ", z = " << vec.z << " }";
+    return ss.str();
+}

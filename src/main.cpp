@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
 
 	// Load scene file
 	scene = new Scene(sceneFile);
-	exit(0);
+	scene->buildDevData();
 
 	//Create Instance for ImGUIData
 	guiData = new GuiDataContainer();
@@ -81,7 +81,9 @@ int main(int argc, char** argv) {
 	// GLFW main loop
 	mainLoop();
 
+	// free memory
 	Resource::clear();
+	scene->clear();
 
 	return 0;
 }

@@ -11,14 +11,14 @@
  * Compute a point at parameter value `t` on ray `r`.
  * Falls slightly short so that it doesn't intersect the object it's hitting.
  */
-__host__ __device__ glm::vec3 getPointOnRay(Ray r, float t) {
+__host__ __device__ static glm::vec3 getPointOnRay(Ray r, float t) {
     return r.origin + (t - .0001f) * glm::normalize(r.direction);
 }
 
 /**
  * Multiplies a mat4 and a vec4 and returns a vec3 clipped from the vec4.
  */
-__host__ __device__ glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v) {
+__host__ __device__ static glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v) {
     return glm::vec3(m * v);
 }
 
@@ -32,7 +32,7 @@ __host__ __device__ glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v) {
  * @param outside            Output param for whether the ray came from outside.
  * @return                   Ray parameter `t` value. -1 if no intersection.
  */
-__host__ __device__ float boxIntersectionTest(Geom box, Ray r,
+__host__ __device__ static float boxIntersectionTest(Geom box, Ray r,
         glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside) {
     Ray q;
     q.origin    =                multiplyMV(box.inverseTransform, glm::vec4(r.origin   , 1.0f));
@@ -86,7 +86,7 @@ __host__ __device__ float boxIntersectionTest(Geom box, Ray r,
  * @param outside            Output param for whether the ray came from outside.
  * @return                   Ray parameter `t` value. -1 if no intersection.
  */
-__host__ __device__ float sphereIntersectionTest(Geom sphere, Ray r,
+__host__ __device__ static float sphereIntersectionTest(Geom sphere, Ray r,
         glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside) {
     float radius = .5;
 
@@ -112,10 +112,10 @@ __host__ __device__ float sphereIntersectionTest(Geom sphere, Ray r,
     if (t1 < 0 && t2 < 0) {
         return -1;
     } else if (t1 > 0 && t2 > 0) {
-        t = min(t1, t2);
+        t = std::min(t1, t2);
         outside = true;
     } else {
-        t = max(t1, t2);
+        t = std::max(t1, t2);
         outside = false;
     }
 
@@ -130,21 +130,61 @@ __host__ __device__ float sphereIntersectionTest(Geom sphere, Ray r,
     return glm::length(r.origin - intersectionPoint);
 }
 
-// A caller that switches on geometry type and call actual intersection test.
-__host__ __device__ float intersectionTest(Geom geometry, Ray r,
-    glm::vec3& intersectionPoint, glm::vec3& normal, bool& outside) {
-    float t = -1.0f;
+//// A caller that switches on geometry type and call actual intersection test.
+//__host__ __device__ static float intersectionTest(Geom geometry, Ray r,
+//    glm::vec3& intersectionPoint, glm::vec3& normal, bool& outside) {
+//    float t = -1.0f;
+//
+//    switch (geometry.type)
+//    {
+//    case GeomType::SPHERE:
+//        t = sphereIntersectionTest(geometry, r, intersectionPoint, normal, outside);
+//        break;
+//    case GeomType::CUBE:
+//        t = boxIntersectionTest(geometry, r, intersectionPoint, normal, outside);
+//    default:
+//        break;
+//    }
+//
+//    return t;
+//}
 
-    switch (geometry.type)
-    {
-    case GeomType::SPHERE:
-        t = sphereIntersectionTest(geometry, r, intersectionPoint, normal, outside);
-        break;
-    case GeomType::CUBE:
-        t = boxIntersectionTest(geometry, r, intersectionPoint, normal, outside);
-    default:
-        break;
+__host__ __device__ static bool intersectTriangle(Ray ray,
+    glm::vec3 v0, glm::vec3 v1, glm::vec3 v2,
+    glm::vec2& bary, float& dist
+) {
+    glm::vec3 e01 = v1 - v0;
+    glm::vec3 e02 = v2 - v0;
+    glm::vec3 ori = ray.origin;
+    glm::vec3 dir = ray.direction;
+    glm::vec3 p = glm::cross(dir, e02);
+
+    float det = glm::dot(p, e01);
+
+    if (glm::abs(det) < FLT_EPSILON) {
+        return false;
+    }
+    glm::vec3 v0ToOri = ori - v0;
+
+    if (det < 0.f) {
+        det = -det;
+        v0ToOri = -v0ToOri;
     }
 
-    return t;
+    bary.x = glm::dot(v0ToOri, p);
+
+    if (bary.x < 0.f || bary.x > det) {
+        return false;
+    }
+    glm::vec3 perp = glm::cross(v0ToOri, e01);
+    bary.y = glm::dot(dir, perp);
+
+    if (bary.y < 0.f || bary.x + bary.y > det) {
+        return false;
+    }
+
+    float detInv = 1.f / det;
+    dist = glm::dot(e02, perp) * detInv;
+    bary *= detInv;
+    return dist > 0.f;
 }

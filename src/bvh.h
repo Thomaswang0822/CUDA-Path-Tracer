@@ -2,11 +2,11 @@
 
 #include <vector>
 #include <sstream>
-#include <host_defines.h>
+#include <iomanip>
 #include "glm/glm.hpp"
 #include "camera.h"
 
-#define BVHNodeNonLeaf -1
+#define NullPrimitive -1
 
 struct AABB {
     glm::vec3 minPos;
@@ -32,8 +32,9 @@ struct AABB {
     /** Helpers */
     std::string toString() const {
         std::stringstream ss;
-        ss << "[AABB " << "pMin = " << minPos.x << " " << minPos.y << " " << minPos.z;
-        ss << ", pMax = " << maxPos.x << " " << maxPos.y << " " << maxPos.z << "]";
+        ss << "[AABB " << "pMin = " << utilityCore::vec3ToString(minPos);
+        ss << ", pMax = " << utilityCore::vec3ToString(maxPos);
+        ss << ", center = " << utilityCore::vec3ToString(this->center()) << "]";
         return ss.str();
     }
 
@@ -68,7 +69,7 @@ struct AABB {
         glm::vec3 tb = glm::max(t1, t2);
 
         float tMin = -FLT_MAX, tMax = FLT_MAX;
-#pragma unroll
+
         for (int i = 0; i < 3; i++) {
             if (glm::abs(dir[i]) > EPSILON) {
                 if (tb[i] >= 0.f && tb[i] >= ta[i]) {
@@ -79,11 +80,11 @@ struct AABB {
         }
         dist = tMin;
 
-        if (tMax >= tMin && tMin >= 0) {
+        if (tMax >= tMin - EPSILON && tMin >= 0) {
             glm::vec3 mid = ray.getPoint((tMin + tMax) * .5f);
-#pragma unroll
+
             for (int i = 0; i < 3; i++) {
-                if (mid[i] < minPos[i] || mid[i] > maxPos[i]) {
+                if (mid[i] < minPos[i] - EPSILON || mid[i] >= maxPos[i] + EPSILON) {
                     return false;
                 }
             }

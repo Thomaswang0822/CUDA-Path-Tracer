@@ -117,10 +117,6 @@ namespace mathUtil {
         return glm::pow(color, glm::vec3(1.f / 2.2f));
     }
 
-    template<typename T>
-    size_t byteSizeOfVector(const std::vector<T>& v) {
-        return v.size() * sizeof(T);
-    }
 }
 
 
