@@ -134,7 +134,13 @@ __global__ void computeIntersections(
 
 	if (path_index < num_paths) {
 		PathSegment pathSegment = pathSegments[path_index];
+#if BVH_DEBUG_VISUALIZATION
+		scene->visualizedIntersect(pathSegment.ray, intersections[path_index]);
+#else
 		scene->intersect(pathSegment.ray, intersections[path_index]);
+#endif // BVH_DEBUG_VISUALIZATION
+
+		
 	}
 }
 
@@ -208,12 +214,25 @@ __global__ void shadeSegment(
 	}
 
 	Sampler sampler(iter, idx, segments[idx].remainingBounces);
-	Material material = scene->devMaterials[intersec.materialId];
+	Material& material = scene->devMaterials[intersec.materialId];
 	PathSegment& segment = segments[idx];
 
 	// TODO
 	// Perform light area sampling and MIS
 	//segment.radiance = material.baseColor;
+
+#if BVH_DEBUG_VISUALIZATION
+	float logDepth = 0.f;
+	int size = scene->BVHSize;
+	while (size) {
+		logDepth += 1.f;
+		size >>= 1;
+	}
+	segment.radiance = glm::vec3(float(intersec.primitive) / logDepth * .1f);
+	//segment.radiance = intersec.primitive > 16 ? glm::vec3(1.f) : glm::vec3(0.f);
+	segment.remainingBounces = 0;
+	return;
+#endif
 
 	if (material.type == Material::Type::Light) {
 		// TODO
@@ -224,13 +243,29 @@ __global__ void shadeSegment(
 		segment.remainingBounces = 0;
 	}
 	else {
+		/*/// DEBUG
+		segment.radiance = intersec.normal;
+		segment.remainingBounces = 0;
+		return;*/
+
+		if (material.type != Material::Type::Dielectric && glm::dot(intersec.normal, intersec.inDir) < 0.f) {
+			intersec.normal = -intersec.normal;
+		}
+
 		BSDFSample sample;
 		materialSample(intersec.normal, intersec.inDir, material, sampler.sample3D(), sample);
 
 		if (sample.type == BSDFSampleType::Invalid) {
 			// Terminate path if sampling fails
+			//segment.radiance = DEBUG_RED;
 			segment.remainingBounces = 0;
 		}
+		/// DEBUG
+		/*else if (iter > 0) {
+			segment.radiance = sample.bsdf / sample.pdf;
+			segment.remainingBounces = 0;
+			return;
+		}*/
 		else {
 			bool isSampleDelta = (sample.type & BSDFSampleType::Specular);
 			segment.throughput *= sample.bsdf / sample.pdf *

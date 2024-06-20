@@ -80,7 +80,7 @@ __device__ static glm::vec3 dielectricBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 
 }
 
 __device__ static float dielectricPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi, const Material& m) {
-    return 0.f;
+    return 1.f;
 }
 
 __device__ static void dielectricSample(glm::vec3 n, glm::vec3 wo, const Material& m, glm::vec3 r, BSDFSample& sample) {

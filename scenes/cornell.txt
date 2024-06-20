@@ -17,6 +17,7 @@ Type		Light
 Metallic	0
 Roughness	1
 Ior			0
+Emittance	1
 NormalMap	Null
 
 Material White

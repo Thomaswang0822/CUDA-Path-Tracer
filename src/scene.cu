@@ -545,7 +545,7 @@ __device__ void DevScene::intersect(Ray ray, Intersection& intersec) {
     }
 }
 
-__device__ void DevScene::debugIntersect(Ray ray, Intersection& intersec) {
+__device__ void DevScene::visualizedIntersect(Ray ray, Intersection& intersec) {
     float closestDist = FLT_MAX;
     int closestPrimId = NullPrimitive;
     glm::vec2 closestBary;

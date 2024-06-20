@@ -85,7 +85,7 @@ struct DevScene {
     __device__ bool intersectPrimitive(int primId, Ray ray, float& dist, glm::vec2& bary);
     __device__ bool intersectPrimitiveDetailed(int primId, Ray ray, Intersection& intersec);
     __device__ void intersect(Ray ray, Intersection& intersec);
-    __device__ void debugIntersect(Ray ray, Intersection& intersec);
+    __device__ void visualizedIntersect(Ray ray, Intersection& intersec);
 };
 
 class Scene {

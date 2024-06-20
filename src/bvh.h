@@ -80,11 +80,11 @@ struct AABB {
         }
         dist = tMin;
 
-        if (tMax >= tMin - EPSILON && tMin >= 0) {
+        if (tMax >= 0.f && tMax >= tMin - EPSILON) {
             glm::vec3 mid = ray.getPoint((tMin + tMax) * .5f);
 
             for (int i = 0; i < 3; i++) {
-                if (mid[i] < minPos[i] - EPSILON || mid[i] >= maxPos[i] + EPSILON) {
+                if (mid[i] <= minPos[i] - EPSILON || mid[i] >= maxPos[i] + EPSILON) {
                     return false;
                 }
             }

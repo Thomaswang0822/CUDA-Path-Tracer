@@ -12,7 +12,7 @@
 #define TWO_PI            6.2831853071795864769252867665590057683943f
 #define INV_PI            0.3183098861837906912164442019275156781077f
 #define SQRT_OF_ONE_THIRD 0.5773502691896257645091487805019574556476f
-#define EPSILON           0.00001f
+#define EPSILON           1e-6f
 
 namespace mathUtil {
     __host__ __device__ inline float nonnegativeDot(glm::vec3 a, glm::vec3 b) {

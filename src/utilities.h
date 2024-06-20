@@ -12,6 +12,7 @@
 #include "mathUtility.h"
 #include "cudaUtil.h"
 #include "sampler.h"
+#include "debugUtil.h"
 
 class GuiDataContainer
 {
