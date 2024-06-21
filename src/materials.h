@@ -87,8 +87,6 @@ __device__ static void dielectricSample(glm::vec3 n, glm::vec3 wo, const Materia
     float ior = m.ior;
     // these 2 pdfs are deterministic
     float pdfRefl = fresnel(glm::dot(n, wo), ior);
-    float pdfTran = 1.f - pdfRefl;
-    //pdfRefl = 1.f;
     sample.pdf = 1.f;
     sample.bsdf = m.baseColor;
 

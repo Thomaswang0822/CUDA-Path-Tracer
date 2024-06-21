@@ -1,9 +1,8 @@
 #pragma once
 
+#include "camera.h"
 #include <string>
 #include <vector>
-
-#include "camera.h"
 
 #define BACKGROUND_COLOR (glm::vec3(0.0f))
 

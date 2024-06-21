@@ -1,11 +1,11 @@
-#include <iostream>
+#include "bvh.h"
+#include "materials.h"
+#include "mesh.h"
 #include "scene.h"
-//#include <cstring>
-#include <string>
+#include <iostream>
 #include <map>
-#include <filesystem>
-#include <glm/gtc/matrix_inverse.hpp>
-#include <glm/gtx/intersect.hpp>
+#include <string>
+#include "intersections.h"
 
 map<string, Material::Type> MaterialTypeTokenMap = {
     { "Lambertian", Material::Type::Lambertian},
@@ -14,106 +14,13 @@ map<string, Material::Type> MaterialTypeTokenMap = {
     { "Light", Material::Type::Light }
 };
 
-std::map<std::string, MeshData*> Resource::meshDataPool;
-std::map<std::string, Image*> Resource::texturePool;
-std::filesystem::path Resource::scenes_path = std::filesystem::path(ABS_SCENES_PATH);
-
-#pragma region Resource
-MeshData* Resource::loadOBJMesh(const std::string& filename) {
-    auto find = meshDataPool.find(filename);
-    if (find != meshDataPool.end()) {
-        return find->second;
-    }
-    auto model = new MeshData;
-
-    tinyobj::attrib_t attrib;
-    std::vector<tinyobj::shape_t> shapes;
-    std::string warn, err;
-
-    std::filesystem::path full_path = scenes_path / filename;
-    const std::string full_path_string = full_path.string();
-
-    std::cout << "MeshData::loading {" << full_path << "}" << std::endl;
-    if (!tinyobj::LoadObj(&attrib, &shapes, nullptr, &warn, &err, full_path_string.c_str())) {
-        std::cout << "failed\n\tError msg {" << err << "}" << std::endl;
-        return nullptr;
-    }
-    bool hasTexcoord = !attrib.texcoords.empty();
-
-#if INDEXED_MESH_DATA
-    model->vertices.resize(attrib.vertices.size() / 3);
-    model->normals.resize(attrib.normals.size() / 3);
-    memcpy(model->vertices.data(), attrib.vertices.data(), attrib.vertices.size() * sizeof(float));
-    memcpy(model->normals.data(), attrib.normals.data(), attrib.normals.size() * sizeof(float));
-    if (hasTexcoord) {
-        model->texcoord.resize(attrib.texcoords.size() / 2);
-        memcpy(model->texcoords.data(), attrib.texcoords.data(), attrib.texcoords.size() * sizeof(float));
-    }
-    else {
-        model->texcoord.resize(attrib.vertices.size() / 3);
-    }
-
-    for (const auto& shape : shapes) {
-        for (auto idx : shape.mesh.indices) {
-            model->indices.push_back({ idx.vertex_index, idx.normal_index,
-                hasTexcoord ? idx.texcoord_index : idx.vertex_index });
-        }
-}
-#else
-    for (const auto& shape : shapes) {
-        for (auto idx : shape.mesh.indices) {
-            model->vertices.push_back(*((glm::vec3*)attrib.vertices.data() + idx.vertex_index));
-            model->normals.push_back(*((glm::vec3*)attrib.normals.data() + idx.normal_index));
-
-            model->texcoords.push_back(hasTexcoord ?
-                *((glm::vec2*)attrib.texcoords.data() + idx.texcoord_index) :
-                glm::vec2(0.f)
-            );
-        }
-    }
-#endif
-    std::cout << "\t\t[Vertex count = " << model->vertices.size() << "]" << std::endl;
-    meshDataPool[filename] = model;
-    return model;
-}
-
-MeshData* Resource::loadGLTFMesh(const std::string& filename) {
-    return nullptr;
-}
-
-MeshData* Resource::loadModelMeshData(const std::string& filename) {
-    if (filename.find(".obj") != filename.npos) {
-        return loadOBJMesh(filename);
-    }
-    else {
-        return loadGLTFMesh(filename);
-    }
-}
-
-Image* Resource::loadTexture(const std::string& filename) {
-    auto find = texturePool.find(filename);
-    if (find != texturePool.end()) {
-        return find->second;
-    }
-    auto texture = new Image(filename);
-    texturePool[filename] = texture;
-    return texture;
-}
-
-void Resource::clear() {
-    for (auto i : meshDataPool) {
-        delete i.second;
-    }
-    meshDataPool.clear();
-
-    for (auto i : texturePool) {
-        delete i.second;
-    }
-    texturePool.clear();
-}
-#pragma endregion
-
 #pragma region Scene
+
+/**
+ * A "shallow" constructor.
+ * Only data directly linked to scene def file is initialized, which include
+ * materials, objects (meshes), and camera.
+ */
 Scene::Scene(const std::string& filename) {
     std::cout << "Scene::Reading from {" << filename << "}..." << std::endl;
     std::cout << " " << std::endl;
@@ -148,24 +55,17 @@ Scene::~Scene() {
     clear();
 }
 
+/**
+ * Finish remaining details of Scene (and its DevScene).
+ * 
+ * This include:
+ * - populate meshData and materialIds;
+ * - build BVH (boundingBoxes and BVHNodes);
+ * - manage and copy to device memory;
+ */
 void Scene::buildDevData() {
     // Put all texture devData in a big buffer
     // and setup device texture objects to manage
-    /*std::vector<DevTextureObj> textureObjs;
-    size_t textureTotalSize = 0;
-    for (auto tex : textures) {
-        textureTotalSize += tex->byteSize();
-    }
-    cudaMalloc(&devTextureData, textureTotalSize);
-    size_t textureOffset = 0;
-    for (auto tex : textures) {
-        cudaMemcpy(devTextureData + textureOffset, tex->data(), tex->byteSize(), cudaMemcpyKind::cudaMemcpyHostToDevice);
-        textureObjs.push_back({ tex, devTextureData + textureOffset });
-        textureOffset += tex->byteSize();
-    }
-    cudaMalloc(&devTextureObjs, textureObjs.size() * sizeof(DevTextureObj));
-    cudaMemcpy(devTextureObjs, textureObjs.data(), textureObjs.size() * sizeof(DevTextureObj),
-        cudaMemcpyKind::cudaMemcpyHostToDevice);*/
 
 #if MESH_DATA_INDEXED
 #else
@@ -182,17 +82,25 @@ void Scene::buildDevData() {
 #endif
     BVHSize = BVHBuilder::build(meshData.vertices, boundingBoxes, BVHNodes);
     checkCUDAError("BVH Build");
-    hstScene.createDevData(*this);
+    hostScene.createDevData(*this);
     cudaMalloc(&devScene, sizeof(DevScene));
-    cudaMemcpyHostToDev(devScene, &hstScene, sizeof(DevScene));
-    checkCUDAError("Dev Scene");
+    cudaMemcpyHostToDev(devScene, &hostScene, sizeof(DevScene));
+    checkCUDAError("Allocate device memory and copy everything");
 }
 
+/**
+ * Free memory of CPU Scene and GPU DevScene.
+ * But since everything on CPU can be auto-destroyed (e.g. std::vector),
+ * we only take care of GPU memory.
+ */
 void Scene::clear() {
-    hstScene.freeDevData();
+    hostScene.freeDevData();
     cudaSafeFree(devScene);
 }
 
+/**
+ * Allocate memory of a ModelInstance and populate it.
+ */
 void Scene::loadModel(const std::string& objId) {
     std::cout << "Scene::Loading MeshData {" << objId << "}..." << std::endl;
 
@@ -247,6 +155,9 @@ void Scene::loadModel(const std::string& objId) {
     modelInstances.push_back(instance);
 }
 
+/**
+ * Load camera (one def per scene assumed) and precompute several parameters.
+ */
 void Scene::loadCamera() {
     cout << "Loading Camera ..." << endl;
     RenderState& state = this->state;
@@ -319,6 +230,12 @@ void Scene::loadCamera() {
     cout << "Loaded camera!" << endl;
 }
 
+/**
+ * Load a material.
+ * 
+ * @note when adding/removing/changing a property,
+ * also change scene def and this function.
+ */
 void Scene::loadMaterial(const std::string& materialId) {
     std::cout << "Scene::Loading Material {" << materialId << "}..." << std::endl;
     Material material;
@@ -349,13 +266,17 @@ void Scene::loadMaterial(const std::string& materialId) {
             material.emittance = std::stof(tokens[1]);
         }
     }
-    materialMap[materialId] = materials.size();
+    materialMap[materialId] = int(materials.size());
     materials.push_back(material);
     std::cout << "\tComplete" << std::endl;
 }
 #pragma endregion
 
 #pragma region DevScene
+
+/**
+ * Brainless cudaMalloc() and cudaMemcpy().
+ */
 void DevScene::createDevData(Scene& scene) {
     // Put all texture devData in a big buffer
     // and setup device texture objects to manage
@@ -405,10 +326,13 @@ void DevScene::createDevData(Scene& scene) {
         cudaMalloc(&devBVHNodes[i], byteSizeOf(scene.BVHNodes[i]));
         cudaMemcpyHostToDev(devBVHNodes[i], scene.BVHNodes[i].data(), byteSizeOf(scene.BVHNodes[i]));
     }
-    BVHSize = scene.BVHSize;
+    BVHSize = int(scene.BVHSize);
     checkCUDAError("DevScene::BVHNodes[6]");
 }
 
+/**
+ * Brainless cudaSafeFree().
+ */
 void DevScene::freeDevData() {
     cudaSafeFree(devTextureData);
     cudaSafeFree(devTextureObjs);
@@ -425,6 +349,16 @@ void DevScene::freeDevData() {
     }
 }
 
+/**
+ * Given a ray direction, pick a MTBVH.
+ * @see bvh.cpp and bvh.h for more details
+ * 
+ * @param dir Direction of the ray
+ * @return An index in 0-5
+ * 
+ * |dir.x| dominates, then (dir.x > 0) ? 0 : 1
+ * similar stories for dir.y and dir.z
+ */
 __device__ int DevScene::getMTBVHId(glm::vec3 dir) {
     glm::vec3 absDir = glm::abs(dir);
     if (absDir.x > absDir.y) {
@@ -445,7 +379,12 @@ __device__ int DevScene::getMTBVHId(glm::vec3 dir) {
     }
 }
 
-__device__ void DevScene::getIntersecGeomInfo(int primId, glm::vec2 bary, Intersection& intersec) {
+/**
+ * After intersection test, fetch info of intersected triangle.
+ * 
+ * @param intersec Output parameter to be updated
+ */
+__device__ void DevScene::getIntersecGeomInfo(int primId, const glm::vec2 bary, Intersection& intersec) {
     glm::vec3 va = devVertices[primId * 3 + 0];
     glm::vec3 vb = devVertices[primId * 3 + 1];
     glm::vec3 vc = devVertices[primId * 3 + 2];
@@ -463,19 +402,28 @@ __device__ void DevScene::getIntersecGeomInfo(int primId, glm::vec2 bary, Inters
     intersec.texcoord = tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
 }
 
-__device__ bool DevScene::intersectPrimitive(int primId, Ray ray, float& dist, glm::vec2& bary) {
+/**
+ * Grab the triangle from the vertices pool and perform ray-triangle test.
+ * 
+ * @param dist Output parameter to be updated (if a closer hit occurs)
+ * @param bary Output parameter to be updated (if a closer hit occurs)
+ */
+__device__ bool DevScene::intersectPrimitive(int primId, const Ray& ray, float& dist, glm::vec2& bary) {
     glm::vec3 va = devVertices[primId * 3 + 0];
     glm::vec3 vb = devVertices[primId * 3 + 1];
     glm::vec3 vc = devVertices[primId * 3 + 2];
 
-    if (!intersectTriangle(ray, va, vb, vc, bary, dist)) {
+    /*if (!intersectTriangle(ray, va, vb, vc, bary, dist)) {
         return false;
     }
     glm::vec3 hitPoint = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
-    return true;
+    return true;*/
+    
+    return intersectTriangle(ray, va, vb, vc, bary, dist);
 }
 
-__device__ bool DevScene::intersectPrimitiveDetailed(int primId, Ray ray, Intersection& intersec) {
+/** NOT USED YET */
+__device__ bool DevScene::intersectPrimitiveDetailed(int primId, const Ray& ray, Intersection& intersec) {
     glm::vec3 va = devVertices[primId * 3 + 0];
     glm::vec3 vb = devVertices[primId * 3 + 1];
     glm::vec3 vc = devVertices[primId * 3 + 2];
@@ -500,7 +448,12 @@ __device__ bool DevScene::intersectPrimitiveDetailed(int primId, Ray ray, Inters
     return true;
 }
 
-__device__ void DevScene::intersect(Ray ray, Intersection& intersec) {
+/**
+ * Given a ray, find the cloest intersection, if one exist, in the entire scene.
+ * 
+ * @param intersec Output parameter
+ */
+__device__ void DevScene::intersect(const Ray& ray, Intersection& intersec) {
     float closestDist = FLT_MAX;
     int closestPrimId = NullPrimitive;
     glm::vec2 closestBary;
@@ -545,7 +498,12 @@ __device__ void DevScene::intersect(Ray ray, Intersection& intersec) {
     }
 }
 
-__device__ void DevScene::visualizedIntersect(Ray ray, Intersection& intersec) {
+/**
+ * DEBUG version intersection test.
+ * 
+ * intersec.primitive will be written with #triangles hit
+ */
+__device__ void DevScene::visualizedIntersect(const Ray& ray, Intersection& intersec) {
     float closestDist = FLT_MAX;
     int closestPrimId = NullPrimitive;
     glm::vec2 closestBary;

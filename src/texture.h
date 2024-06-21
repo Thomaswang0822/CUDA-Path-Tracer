@@ -1,10 +1,7 @@
 #pragma once
 
-#include <glm/glm.hpp>
-#include <cuda.h>
-#include <host_defines.h>
-
 #include "image.h"
+#include <cuda_runtime.h>
 
 struct DevTextureObj {
 	int width, height;

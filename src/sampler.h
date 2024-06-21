@@ -1,9 +1,8 @@
 #pragma once
 
-#include <cuda.h>
-#include <thrust/execution_policy.h>
-#include <thrust/random.h>
+#include <cuda_runtime.h>
 #include <glm/glm.hpp>
+#include <thrust/random.h>
 
 
 /**

@@ -1,9 +1,9 @@
+#include "image.h"
+
 #include <iostream>
 #include <string>
 #include <stb_image_write.h>
 #include <stb_image.h>
-
-#include "image.h"
 
 Image::Image(int x, int y) :
         xSize(x),

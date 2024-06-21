@@ -1,13 +1,18 @@
 #pragma once
 
-#include <vector>
-#include <sstream>
-#include <iomanip>
-#include "glm/glm.hpp"
 #include "camera.h"
+#include "utilities.h"
+#include <sstream>  // for std::stringstream
+#include <string>
+#include <vector>
 
+/** Constants */
+#define NUM_FACES 6  // 6 major directions
 #define NullPrimitive -1
 
+/**
+ * Axis-aligned bounding box.
+ */
 struct AABB {
     glm::vec3 minPos;
     glm::vec3 maxPos;
@@ -48,7 +53,7 @@ struct AABB {
         return 2.0f * (size3D.x * size3D.y + size3D.x * size3D.z + size3D.y * size3D.z);
     }
 
-    __host__ __device__ inline size_t longestAxis() const {
+    __host__ __device__ inline int longestAxis() const {
         glm::vec3 size3D = maxPos - minPos;
         if (size3D.x < size3D.y) {  // compare Y and Z
             return (size3D.y < size3D.z) ? 2 : 1;
@@ -58,6 +63,12 @@ struct AABB {
         }
     }
 
+    /**
+     * (AABB) test intersection against a Ray.
+     * 
+     * @param dist The current shortest hit distance. Hits further than it will be ignored.
+     * @return true if a valid (shorter) hit occurs. dist will be modified if true.
+     */
     __host__ __device__ bool intersect(const Ray& ray, float& dist) {
         glm::vec3 ori = ray.origin;
         glm::vec3 dir = ray.direction;
@@ -95,17 +106,17 @@ struct AABB {
 };
 
 /**
- * Multi-Threaded BVH
+ * Multi-Threaded BVH (bounding volume hierarchy)
  * MTBVH enables stackless BVH traversal on GPU, saving many registers that were used in stack-based
  * traversal. It's simple and efficient.
  * 
  * @see https://cs.uwaterloo.ca/~thachisu/tdf2015.pdf
- * @see https://developer.nvidia.com/blog/thinking-parallel-part-ii-tree-traversal-gpu/
+ * @see https://developer.nvidia.com/blog/thinking-parallel-part-i-collision-detection-gpu/
  */
 struct MTBVHNode {
-    int primitiveId;
-    int boundingBoxId;
-    int nextNodeIfMiss;
+    int primitiveId;  // which triangle, -1 if non-leaf
+    int boundingBoxId;  // which AABB
+    int nextNodeIfMiss;  // next node if one ray misses this node.
 
     MTBVHNode() = default;
     MTBVHNode(int primId, int boxId, int next) :
@@ -119,7 +130,7 @@ class BVHBuilder {
 private:
     struct NodeInfo {
         bool isLeaf;
-        int primIdOrSize;
+        int primIdOrSize;  // leaf-node ? which_triangle : #triangles
     };
 
     struct PrimInfo {
@@ -133,17 +144,16 @@ private:
         int start;
         int end;
     };
-public:
-    static int build(
-        const std::vector<glm::vec3>& vertices,
-        std::vector<AABB>& boundingBoxes,
-        std::vector<std::vector<MTBVHNode>>& BVHNodes);
 
-private:
     static void buildMTBVH(
         const std::vector<AABB>& boundingBoxes,
         const std::vector<NodeInfo>& nodeInfo,
         int BVHSize,
         std::vector<std::vector<MTBVHNode>>& BVHNodes);
 
+public:
+    static int build(
+        const std::vector<glm::vec3>& vertices,
+        std::vector<AABB>& boundingBoxes,
+        std::vector<std::vector<MTBVHNode>>& BVHNodes);
 };

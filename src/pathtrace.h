@@ -1,7 +1,5 @@
 #pragma once
 
-#include <vector>
-#include <device_launch_parameters.h>  // "let VS know" blockIdx etc.
 #include "scene.h"
 
 void InitDataContainer(GuiDataContainer* guiData);

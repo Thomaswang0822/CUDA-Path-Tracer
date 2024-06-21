@@ -1,19 +1,13 @@
-#include <cstdio>
-#include <cuda.h>
-#include <cmath>
-#include <thrust/execution_policy.h>
-#include <thrust/random.h>
-#include <thrust/remove.h>
-#include <thrust/device_ptr.h>
-
-#include "sceneStructs.h"
-#include "scene.h"
-#include "materials.h"
-#include "glm/gtx/norm.hpp"
-#include "utilities.h"
 #include "pathtrace.h"
-#include "intersections.h"
-#include "interactions.h"
+#include "materials.h"
+#include "sampler.h"
+#include "scene.h"
+#include "sceneStructs.h"
+#include "utilities.h"
+#include <cuda_runtime.h>
+#include <device_launch_parameters.h>  // "let VS know" blockIdx etc.
+#include <thrust/device_ptr.h>
+#include <thrust/remove.h>
 
 
 //Kernel that writes the image to the OpenGL PBO directly.
@@ -169,7 +163,7 @@ __global__ void shadeFakeMaterial(
 			// Set up the Sampler
 			Sampler sampler(iter, idx, 0);
 
-			Material material = materials[intersection.materialId];
+			Material& material = materials[intersection.materialId];
 			glm::vec3 materialColor = material.baseColor;
 
 			// If the material indicates that the object was a light, "light" the ray
@@ -409,7 +403,7 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 		 * @see https://nvidia.github.io/cccl/thrust/api/function_group__stream__compaction_1gaf01d45b30fecba794afae065d625f94f.html#thrust-remove-if
 		 */
 		auto thr_paths_alive_end = thrust::remove_if(thr_paths_alive, thr_paths_alive + num_paths, RemoveInvalidPaths());
-		num_paths = thr_paths_alive_end - thr_paths_alive;
+		num_paths = static_cast<int>(thr_paths_alive_end - thr_paths_alive);
 		//std::cout << "Remaining paths: " << num_paths << "\n";
 
 		iterationComplete = bool(num_paths == 0);
@@ -422,8 +416,8 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 
 	// Assemble this iteration and apply it to the image
 	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-	int numEffectivePaths = next_thr_paths_done.get() - paths_done;
-	finalGather << <numBlocksPixels, blockSize1d >> > (numEffectivePaths, dev_image, paths_done);
+	int numEffectivePaths = static_cast<int>(next_thr_paths_done.get() - paths_done);
+	finalGather <<<numBlocksPixels, blockSize1d >>> (numEffectivePaths, dev_image, paths_done);
 
 	///////////////////////////////////////////////////////////////////////////
 

@@ -4,12 +4,8 @@
 //  File: utilities.cpp
 //  A collection/kitchen sink of generally useful functions
 
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/matrix_inverse.hpp>
-#include <iostream>
-#include <cstdio>
-
 #include "utilities.h"
+#include <glm/gtx/transform.hpp>
 
 float utilityCore::clamp(float f, float min, float max) {
     if (f < min) {

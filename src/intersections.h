@@ -1,17 +1,13 @@
 #pragma once
 
-#include <glm/glm.hpp>
-#include <glm/gtx/intersect.hpp>
-
 #include "sceneStructs.h"
-#include "utilities.h"
+#include <glm/glm.hpp>
 
-// CHECKITOUT
 /**
  * Compute a point at parameter value `t` on ray `r`.
  * Falls slightly short so that it doesn't intersect the object it's hitting.
  */
-__host__ __device__ static glm::vec3 getPointOnRay(Ray r, float t) {
+__host__ __device__ static glm::vec3 getPointOnRay(const Ray& r, float t) {
     return r.origin + (t - .0001f) * glm::normalize(r.direction);
 }
 
@@ -22,7 +18,6 @@ __host__ __device__ static glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v) {
     return glm::vec3(m * v);
 }
 
-// CHECKITOUT
 /**
  * Test intersection between a ray and a transformed cube. Untransformed,
  * the cube ranges from -0.5 to 0.5 in each axis and is centered at the origin.
@@ -33,9 +28,10 @@ __host__ __device__ static glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v) {
  * @return                   Ray parameter `t` value. -1 if no intersection.
  */
 __host__ __device__ static float boxIntersectionTest(Geom box, Ray r,
-        glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside) {
+        glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside
+) {
     Ray q;
-    q.origin    =                multiplyMV(box.inverseTransform, glm::vec4(r.origin   , 1.0f));
+    q.origin = multiplyMV(box.inverseTransform, glm::vec4(r.origin, 1.0f));
     q.direction = glm::normalize(multiplyMV(box.inverseTransform, glm::vec4(r.direction, 0.0f)));
 
     float tmin = -1e38f;
@@ -50,7 +46,7 @@ __host__ __device__ static float boxIntersectionTest(Geom box, Ray r,
             float ta = glm::min(t1, t2);
             float tb = glm::max(t1, t2);
             glm::vec3 n;
-            n[xyz] = t2 < t1 ? +1 : -1;
+            n[xyz] = t2 < t1 ? +1.f : -1.f;
             if (ta > 0 && ta > tmin) {
                 tmin = ta;
                 tmin_n = n;
@@ -112,10 +108,10 @@ __host__ __device__ static float sphereIntersectionTest(Geom sphere, Ray r,
     if (t1 < 0 && t2 < 0) {
         return -1;
     } else if (t1 > 0 && t2 > 0) {
-        t = std::min(t1, t2);
+        t = min(t1, t2);
         outside = true;
     } else {
-        t = std::max(t1, t2);
+        t = max(t1, t2);
         outside = false;
     }
 

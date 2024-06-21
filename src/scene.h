@@ -2,69 +2,21 @@
 
 #include <vector>
 #include <map>
-#include <filesystem>
-#include <sstream>
 #include <fstream>
-#include <iostream>
 #include "materials.h"
-#include "utilities.h"
 #include "sceneStructs.h"
-#include "TinyObjLoader/tiny_obj_loader.h"
 #include "bvh.h"
 #include "image.h"
 #include "texture.h"
 #include "camera.h"
-#include "intersections.h"
-
-/** Options */
-#define ABS_SCENES_PATH "D:/Code/CUDA-Path-Tracer/scenes"
-#define MESH_DATA_STRUCT_OF_ARRAY false
-#define MESH_DATA_INDEXED false
-
-/** Constants */
-#define NUM_FACES 6
-
-struct MeshData {
-    std::vector<glm::vec3> vertices;
-    std::vector<glm::vec3> normals;
-    std::vector<glm::vec2> texcoords;
-#if MESH_DATA_INDEXED
-    std::vector<glm::ivec3> indices;
-#endif
-};
-
-struct ModelInstance {
-    glm::vec3 translation;
-    glm::vec3 rotation;
-    glm::vec3 scale;
-
-    glm::mat4 transform;
-    glm::mat4 transfInv;
-    glm::mat3 normalMat;
-
-    int materialId;
-    MeshData* meshData;
-};
-
-class Resource {
-private:
-    static std::map<std::string, MeshData*> meshDataPool;
-    static std::map<std::string, Image*> texturePool;
-    static std::filesystem::path scenes_path;
-
-public:
-    // A caller loading different types of mesh format
-    static MeshData* loadModelMeshData(const std::string& filename);
-    static MeshData* loadOBJMesh(const std::string& filename);
-    static MeshData* loadGLTFMesh(const std::string& filename);
-    
-    static Image* loadTexture(const std::string& filename);
-
-    static void clear();
-};
+#include "mesh.h"
 
 class Scene;  // declare for DevScene
 
+/**
+ * Scene definition used on GPU.
+ * Its primary functionality is to compute intersection.
+ */
 struct DevScene {
     glm::vec3* devVertices = nullptr;
     glm::vec3* devNormals = nullptr;
@@ -81,13 +33,18 @@ struct DevScene {
     void createDevData(Scene& scene);
     void freeDevData();
     __device__ int getMTBVHId(glm::vec3 dir);
-    __device__ void getIntersecGeomInfo(int primId, glm::vec2 bary, Intersection& intersec);
-    __device__ bool intersectPrimitive(int primId, Ray ray, float& dist, glm::vec2& bary);
-    __device__ bool intersectPrimitiveDetailed(int primId, Ray ray, Intersection& intersec);
-    __device__ void intersect(Ray ray, Intersection& intersec);
-    __device__ void visualizedIntersect(Ray ray, Intersection& intersec);
+    __device__ void getIntersecGeomInfo(int primId, const glm::vec2 bary, Intersection& intersec);
+    __device__ bool intersectPrimitive(int primId, const Ray& ray, float& dist, glm::vec2& bary);
+    __device__ bool intersectPrimitiveDetailed(int primId, const Ray& ray, Intersection& intersec);
+    __device__ void intersect(const Ray& ray, Intersection& intersec);
+    __device__ void visualizedIntersect(const Ray& ray, Intersection& intersec);
 };
 
+/**
+ * Scene definition on CPU.
+ * It does all the heavy liftings, which include loading everything,
+ * building BVH, and managing a copy of data on GPU.
+ */
 class Scene {
 private:
     std::ifstream fp_in;
@@ -101,7 +58,6 @@ public:
 
     Scene(const std::string& filename);
     ~Scene();
-    // TODO:
     void buildDevData();
     void clear();
 
@@ -112,11 +68,12 @@ public:
     std::map<std::string, int> materialMap;
 
     std::vector<int> materialIds;
-    int BVHSize;
+    size_t BVHSize;
     std::vector<AABB> boundingBoxes;
     std::vector<std::vector<MTBVHNode>> BVHNodes;
     MeshData meshData;
 
-    DevScene hstScene;
+    DevScene hostScene;  // Thus, DevScene is a "subset" of Scene
     DevScene* devScene = nullptr;
 };
+

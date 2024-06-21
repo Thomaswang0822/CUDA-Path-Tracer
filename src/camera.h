@@ -1,6 +1,7 @@
 #pragma once
 
-#include "utilities.h"
+#include "mathUtility.h"
+#include <cuda_runtime.h>
 
 
 struct Ray {

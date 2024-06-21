@@ -1,6 +1,6 @@
 #include "main.h"
 #include "preview.h"
-#include <cstring>
+#include "pathtrace.h"
 
 static std::string startTimeString;
 
@@ -22,7 +22,7 @@ glm::vec3 ogLookAt; // for recentering the camera
 Scene* scene;
 GuiDataContainer* guiData;
 RenderState* renderState;
-int iteration;
+unsigned int iteration;
 
 int width;
 int height;
@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
 }
 
 void saveImage() {
-	float samples = iteration;
+	int samples = iteration;
 	// output image file
 	Image img(width, height);
 
@@ -97,7 +97,7 @@ void saveImage() {
 		for (int y = 0; y < height; y++) {
 			int index = x + (y * width);
 			glm::vec3 pix = renderState->image[index];
-			img.setPixel(width - 1 - x, y, glm::vec3(pix) / samples);
+			img.setPixel(width - 1 - x, y, pix / float(samples));
 		}
 	}
 
@@ -176,6 +176,9 @@ void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
 	middleMousePressed = (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_PRESS);
 }
 
+/**
+ * This function must have fixed signature: 2 doubles.
+ */
 void mousePositionCallback(GLFWwindow* window, double xpos, double ypos) {
 	if (xpos == lastX || ypos == lastY) return; // otherwise, clicking back into window causes re-start
 	if (leftMousePressed) {

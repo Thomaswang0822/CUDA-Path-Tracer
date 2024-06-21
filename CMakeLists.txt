@@ -21,6 +21,9 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     SET_PROPERTY(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
+# Suppress pedantic warnings on things like sprintf() vs sprintf_s()
+add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+
 ########################################
 # CUDA Setup
 ########################################

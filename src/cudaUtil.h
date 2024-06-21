@@ -1,10 +1,8 @@
 #pragma once
 
 #include <vector>
-#include <cstdio>
-#include <cuda.h>
 #include <cuda_runtime.h>
-#include <glm/glm.hpp>
+#include <stdio.h>
 
 #define ERRORCHECK 1
 

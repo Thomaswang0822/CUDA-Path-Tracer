@@ -1,18 +1,13 @@
 #pragma once
 
+#include "cudaUtil.h"
+#include "debugUtil.h"
+#include "mathUtility.h"
 #include <glm/glm.hpp>
-#include <algorithm>
-#include <istream>
-#include <ostream>
-#include <iterator>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
-
-#include "mathUtility.h"
-#include "cudaUtil.h"
-#include "sampler.h"
-#include "debugUtil.h"
 
 class GuiDataContainer
 {
