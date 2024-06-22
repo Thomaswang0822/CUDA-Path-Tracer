@@ -111,7 +111,6 @@ struct AABB {
  * traversal. It's simple and efficient.
  * 
  * @see https://cs.uwaterloo.ca/~thachisu/tdf2015.pdf
- * @see https://developer.nvidia.com/blog/thinking-parallel-part-i-collision-detection-gpu/
  */
 struct MTBVHNode {
     int primitiveId;  // which triangle, -1 if non-leaf
