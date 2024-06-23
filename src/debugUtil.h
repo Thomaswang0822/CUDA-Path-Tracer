@@ -16,6 +16,12 @@ static inline bool badVec(glm::vec3& v) {
 }
 
 __device__
+static inline bool isNanInf(glm::vec3& r) {
+    return isnan(r.x) || isnan(r.y) || isnan(r.z) || 
+           isinf(r.x) || isinf(r.y) || isinf(r.z);
+}
+
+__device__
 static inline bool notUnitLength(glm::vec3& v) {
     float len = glm::length(v);
     return abs(len - 1.f) > 1e-3f;

@@ -25,7 +25,7 @@ struct Ray {
      * @param dir should be normalized.
      */
     __host__ __device__ inline static Ray makeOffsetRay(glm::vec3 orig, glm::vec3 dir) {
-        return { orig + EPSILON * dir, dir };
+        return { orig + 100.f * EPSILON * dir, dir };
     }
 };
 

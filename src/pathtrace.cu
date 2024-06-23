@@ -328,7 +328,11 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
 		PathSegment iterationPath = iterationPaths[index];
 		//image[iterationPath.pixelIndex] += iterationPath.throughput;
 		if (iterationPath.pixelIndex >= 0 && iterationPath.remainingBounces <= 0) {
-			image[iterationPath.pixelIndex] += iterationPath.radiance;
+			if (isNanInf(iterationPath.radiance)) {
+				return;
+			}
+			image[iterationPath.pixelIndex] += glm::clamp(iterationPath.radiance,
+				glm::vec3(0.f), glm::vec3(1e6f));
 		}
 	}
 }

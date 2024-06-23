@@ -76,7 +76,7 @@ void Scene::buildDevData() {
         // grab material info
         const Material& material = materials[inst.materialId];
         glm::vec3 radianceUnitArea = material.baseColor * material.emittance;
-        float powerUnitArea = mathUtil::luminance(radianceUnitArea);
+        float powerUnitArea = mathUtil::luminance(radianceUnitArea) * TWO_PI;
 
         for (size_t i = 0; i < inst.meshData->vertices.size(); i++) {
             meshData.vertices.push_back(glm::vec3(inst.transform * glm::vec4(inst.meshData->vertices[i], 1.f)));
@@ -671,11 +671,15 @@ __device__ float DevScene::sampleDirectLight(glm::vec3 pos, glm::vec4 r, glm::ve
     glm::vec3 normal = mathUtil::triangleNormal(v0, v1, v2);
     glm::vec3 posToSampled = sampled - pos;
 
+#if SCENE_LIGHT_SINGLE_SIDED
     if (glm::dot(normal, posToSampled) > 0.f) {
         return InvalidPdf;
     }
+#endif
+    float area = mathUtil::triangleArea(v0, v1, v2);
     radiance = devLightUnitRadiance[lightId];
     wi = glm::normalize(posToSampled);
-    return mathUtil::pdfAreaToSolidAngle(mathUtil::luminance(radiance) * sumLightPowerInv, pos, sampled, normal);
+    float power = mathUtil::luminance(radiance) / (area * TWO_PI);
+    return mathUtil::pdfAreaToSolidAngle(power * sumLightPowerInv, pos, sampled, normal);
 }
 #pragma endregion
