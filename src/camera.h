@@ -20,6 +20,13 @@ struct Ray {
     __host__ __device__ inline glm::vec3 getPoint(float t) const {
         return origin + direction * t;
     }
+
+    /**
+     * @param dir should be normalized.
+     */
+    __host__ __device__ inline static Ray makeOffsetRay(glm::vec3 orig, glm::vec3 dir) {
+        return { orig + EPSILON * dir, dir };
+    }
 };
 
 struct Camera {

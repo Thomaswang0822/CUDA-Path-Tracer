@@ -40,6 +40,8 @@ struct PathSegment {
     Ray ray;
     glm::vec3 throughput;
     glm::vec3 radiance;
+    float BSDFpdf;
+    bool isDeltaSample;
     int pixelIndex;
     int remainingBounces;
 };
@@ -49,22 +51,41 @@ struct PathSegment {
 // 2) BSDF evaluation: generate a new ray
 struct Intersection {
     //float t;  // hitting distance of current ray
-    int primitive;
+    int primId;
     glm::vec3 position;
     glm::vec3 normal;
-    glm::vec2 texcoord;
+    glm::vec2 uv;
     glm::vec3 inDir;
+    union {
+        glm::vec3 wo;  // for BSDF sampling
+        glm::vec3 prevPos;  // for light sampling
+    };
     int materialId;
+
+    __device__ Intersection() {}
+
+    __device__ Intersection(const Intersection& rhs) {
+        *this = rhs;
+    }
+
+    __device__ void operator = (const Intersection& rhs) {
+        primId = rhs.primId;
+        materialId = rhs.materialId;
+        position = rhs.position;
+        normal = rhs.normal;
+        uv = rhs.uv;
+        wo = rhs.wo;
+    }
 };
 
 struct CompactTerminatedPaths {
     __host__ __device__ bool operator() (const PathSegment& segment) {
-        return !(segment.pixelIndex >= 0 && segment.remainingBounces == 0);
+        return !(segment.pixelIndex >= 0 && segment.remainingBounces <= 0);
     }
 };
 
 struct RemoveInvalidPaths {
     __host__ __device__ bool operator() (const PathSegment& segment) {
-        return segment.pixelIndex < 0 || segment.remainingBounces == 0;
+        return segment.pixelIndex < 0 || segment.remainingBounces <= 0;
     }
 };

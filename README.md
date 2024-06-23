@@ -33,6 +33,9 @@ The parallizable BVH is the biggest reason I picked this repo as my reference.
 - [CPU Path Tracer](https://github.com/Thomaswang0822/torrey_renderer): my own class project
 - [MTBVH](https://cs.uwaterloo.ca/~thachisu/tdf2015.pdf)
 - [More advanced stackless BVH from Nvidia](https://diglib.eg.org:8443/server/api/core/bitstreams/1c026ceb-0c54-4e20-9fd2-2ff77222894d/content)
+- [An awesome algorithm overview](https://computergraphics.stackexchange.com/a/5153/21736): focuses on Monte-Carlo and MIS ideas.
+- [Alias Method](https://keithschwarz.com/darts-dice-coins/): sampling from a discrete distribution in O(1); used for light sampling in the project.
+- [CUDA Unified Memory](https://developer.nvidia.com/blog/unified-memory-cuda-beginners/)
 
 P.S. Documentation of traditional (CUDA-irrelevant) technical details can be found in my CPU path-tracer README.
 

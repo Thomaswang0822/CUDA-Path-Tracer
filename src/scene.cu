@@ -7,7 +7,9 @@
 #include <string>
 #include "intersections.h"
 
-map<string, Material::Type> MaterialTypeTokenMap = {
+#define SCENE_LIGHT_SINGLE_SIDED true
+
+std::map<std::string, Material::Type> MaterialTypeTokenMap = {
     { "Lambertian", Material::Type::Lambertian},
     { "MetallicWorkflow", Material::Type::MetallicWorkflow },
     { "Dielectric", Material::Type::Dielectric },
@@ -69,7 +71,13 @@ void Scene::buildDevData() {
 
 #if MESH_DATA_INDEXED
 #else
+    int primId = 0;
     for (const auto& inst : modelInstances) {
+        // grab material info
+        const Material& material = materials[inst.materialId];
+        glm::vec3 radianceUnitArea = material.baseColor * material.emittance;
+        float powerUnitArea = mathUtil::luminance(radianceUnitArea);
+
         for (size_t i = 0; i < inst.meshData->vertices.size(); i++) {
             meshData.vertices.push_back(glm::vec3(inst.transform * glm::vec4(inst.meshData->vertices[i], 1.f)));
             meshData.normals.push_back(glm::normalize(inst.normalMat * inst.meshData->normals[i]));
@@ -77,15 +85,40 @@ void Scene::buildDevData() {
             if (i % 3 == 0) {
                 materialIds.push_back(inst.materialId);
             }
+            else if (i % 3 == 2 && material.type == Material::Type::Light) {
+                glm::vec3 v0 = meshData.vertices[i - 2];
+                glm::vec3 v1 = meshData.vertices[i - 1];
+                glm::vec3 v2 = meshData.vertices[i - 0];
+                float area = mathUtil::triangleArea(v0, v1, v2);
+                float power = powerUnitArea * area;
+
+                lightPrimIds.push_back(primId);
+                lightUnitRadiance.push_back(radianceUnitArea);
+                lightPower.push_back(power);
+                sumLightPower += power;
+                numLightPrims++;
+            }
+
+            primId += int(i % 3 == 2);
         }
     }
 #endif
+    createLightSampler();
     BVHSize = BVHBuilder::build(meshData.vertices, boundingBoxes, BVHNodes);
     checkCUDAError("BVH Build");
     hostScene.createDevData(*this);
     cudaMalloc(&devScene, sizeof(DevScene));
     cudaMemcpyHostToDev(devScene, &hostScene, sizeof(DevScene));
     checkCUDAError("Allocate device memory and copy everything");
+
+    meshData.clear();
+    boundingBoxes.clear();
+    BVHNodes.clear();
+
+    lightPrimIds.clear();
+    lightPower.clear();
+    lightSampler.probTable.clear();
+    lightSampler.aliasTable.clear();
 }
 
 /**
@@ -230,6 +263,11 @@ void Scene::loadCamera() {
     cout << "Loaded camera!" << endl;
 }
 
+void Scene::createLightSampler() {
+    lightSampler = LightSampler(lightPower);
+    std::cout << "[Light sampler size = " << lightPower.size() << "]" << std::endl;
+}
+
 /**
  * Load a material.
  * 
@@ -277,7 +315,7 @@ void Scene::loadMaterial(const std::string& materialId) {
 /**
  * Brainless cudaMalloc() and cudaMemcpy().
  */
-void DevScene::createDevData(Scene& scene) {
+void DevScene::createDevData(const Scene& scene) {
     // Put all texture devData in a big buffer
     // and setup device texture objects to manage
     std::vector<DevTextureObj> textureObjs;
@@ -328,6 +366,24 @@ void DevScene::createDevData(Scene& scene) {
     }
     BVHSize = int(scene.BVHSize);
     checkCUDAError("DevScene::BVHNodes[6]");
+
+    cudaMalloc(&devLightPrimIds, byteSizeOf(scene.lightPrimIds));
+    cudaMemcpyHostToDev(devLightPrimIds, scene.lightPrimIds.data(), byteSizeOf(scene.lightPrimIds));
+
+    cudaMalloc(&devLightUnitRadiance, byteSizeOf(scene.lightUnitRadiance));
+    cudaMemcpyHostToDev(devLightUnitRadiance, scene.lightPower.data(), byteSizeOf(scene.lightUnitRadiance));
+
+    cudaMalloc(&devProbTable, byteSizeOf(scene.lightSampler.probTable));
+    cudaMemcpyHostToDev(devProbTable, scene.lightSampler.probTable.data(),
+        byteSizeOf(scene.lightSampler.probTable));
+    
+    cudaMalloc(&devAliasTable, byteSizeOf(scene.lightSampler.aliasTable));
+    cudaMemcpyHostToDev(devAliasTable, scene.lightSampler.aliasTable.data(),
+        byteSizeOf(scene.lightSampler.aliasTable));
+    
+    numLightPrims = scene.numLightPrims;
+    sumLightPowerInv = 1.f / scene.sumLightPower;
+    checkCUDAError("DevScene::LightData");
 }
 
 /**
@@ -347,6 +403,11 @@ void DevScene::freeDevData() {
     for (int i = 0; i < NUM_FACES; i++) {
         cudaSafeFree(devBVHNodes[i]);
     }
+
+    cudaSafeFree(devLightPrimIds);
+    cudaSafeFree(devLightUnitRadiance);
+    cudaSafeFree(devProbTable);
+    cudaSafeFree(devAliasTable);
 }
 
 /**
@@ -379,6 +440,13 @@ __device__ int DevScene::getMTBVHId(glm::vec3 dir) {
     }
 }
 
+__device__ glm::vec3 DevScene::getPrimitiveNormal(const int primId) {
+    glm::vec3 v0 = devVertices[primId * 3 + 0];
+    glm::vec3 v1 = devVertices[primId * 3 + 1];
+    glm::vec3 v2 = devVertices[primId * 3 + 2];
+    return glm::normalize(glm::cross(v1 - v0, v2 - v0));
+}
+
 /**
  * After intersection test, fetch info of intersected triangle.
  * 
@@ -399,7 +467,7 @@ __device__ void DevScene::getIntersecGeomInfo(int primId, const glm::vec2 bary, 
 
     intersec.position = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
     intersec.normal = nb * bary.x + nc * bary.y + na * (1.f - bary.x - bary.y);
-    intersec.texcoord = tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
+    intersec.uv = tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
 }
 
 /**
@@ -420,6 +488,17 @@ __device__ bool DevScene::intersectPrimitive(int primId, const Ray& ray, float& 
     return true;*/
     
     return intersectTriangle(ray, va, vb, vc, bary, dist);
+}
+
+__device__ bool DevScene::intersectPrimitive(int primId, const Ray& ray, float distRange) {
+    glm::vec3 va = devVertices[primId * 3 + 0];
+    glm::vec3 vb = devVertices[primId * 3 + 1];
+    glm::vec3 vc = devVertices[primId * 3 + 2];
+
+    glm::vec2 bary;
+    float dist;
+    bool hit = intersectTriangle(ray, va, vb, vc, bary, dist);
+    return (hit && dist < distRange);
 }
 
 /** NOT USED YET */
@@ -444,7 +523,7 @@ __device__ bool DevScene::intersectPrimitiveDetailed(int primId, const Ray& ray,
 
     intersec.position = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
     intersec.normal = nb * bary.x + nc * bary.y + na * (1.f - bary.x - bary.y);
-    intersec.texcoord = tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
+    intersec.uv = tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
     return true;
 }
 
@@ -473,6 +552,7 @@ __device__ void DevScene::intersect(const Ray& ray, Intersection& intersec) {
             if (primId != NullPrimitive) {
                 float dist;
                 glm::vec2 bary;
+                // hit info is written to dist and bary.
                 bool hit = intersectPrimitive(primId, ray, dist, bary);
 
                 if (hit && dist < closestDist) {
@@ -489,19 +569,49 @@ __device__ void DevScene::intersect(const Ray& ray, Intersection& intersec) {
     }
     if (closestPrimId != NullPrimitive) {
         getIntersecGeomInfo(closestPrimId, closestBary, intersec);
-        intersec.primitive = closestPrimId;
-        intersec.inDir = -ray.direction;
+        intersec.primId = closestPrimId;
+        //intersec.inDir = -ray.direction;
         intersec.materialId = devMaterialIds[closestPrimId];
     }
     else {
-        intersec.primitive = NullPrimitive;
+        intersec.primId = NullPrimitive;
     }
+}
+
+/**
+ * Shoot a ray from x to y and test occulsion.
+ */
+__device__ bool DevScene::testOcclusion(glm::vec3 x, glm::vec3 y) {
+    glm::vec3 dir = glm::normalize(y - x);
+    float dist = glm::length(y - x);
+    Ray ray = Ray::makeOffsetRay(x, dir);
+    bool hit = false;
+
+    MTBVHNode* nodes = devBVHNodes[getMTBVHId(-ray.direction)];
+    int node = 0;
+    while (node != BVHSize) {
+        AABB& bound = devBoundingBoxes[nodes[node].boundingBoxId];
+        float boundDist;
+        bool boundHit = bound.intersect(ray, boundDist);
+
+        if (boundHit && boundDist < dist) {
+            int primId = nodes[node].primitiveId;
+            if (primId != NullPrimitive) {
+                hit |= intersectPrimitive(primId, ray, dist);
+            }
+            node++;
+        }
+        else {
+            node = nodes[node].nextNodeIfMiss;
+        }
+    }
+    return hit;
 }
 
 /**
  * DEBUG version intersection test.
  * 
- * intersec.primitive will be written with #triangles hit
+ * intersec.primId will be written with #triangles hit
  */
 __device__ void DevScene::visualizedIntersect(const Ray& ray, Intersection& intersec) {
     float closestDist = FLT_MAX;
@@ -543,6 +653,29 @@ __device__ void DevScene::visualizedIntersect(const Ray& ray, Intersection& inte
     if (closestPrimId == 0) {
         maxDepth = 100.f;
     }
-    intersec.primitive = maxDepth;
+    intersec.primId = maxDepth;
+}
+__device__ float DevScene::sampleDirectLight(glm::vec3 pos, glm::vec4 r, glm::vec3& radiance, glm::vec3& wi) {
+    int bucketId = static_cast<int>(r.x * numLightPrims);
+    int lightId = (r.y < devProbTable[bucketId]) ? bucketId : devAliasTable[bucketId];
+    int primId = devLightPrimIds[lightId];
+
+    glm::vec3 v0 = devVertices[primId * 3 + 0];
+    glm::vec3 v1 = devVertices[primId * 3 + 1];
+    glm::vec3 v2 = devVertices[primId * 3 + 2];
+    glm::vec3 sampled = mathUtil::sampleTriangleUniform(v0, v1, v2, r.z, r.w);
+
+    if (testOcclusion(pos, sampled)) {
+        return InvalidPdf;
+    }
+    glm::vec3 normal = mathUtil::triangleNormal(v0, v1, v2);
+    glm::vec3 posToSampled = sampled - pos;
+
+    if (glm::dot(normal, posToSampled) > 0.f) {
+        return InvalidPdf;
+    }
+    radiance = devLightUnitRadiance[lightId];
+    wi = glm::normalize(posToSampled);
+    return mathUtil::pdfAreaToSolidAngle(mathUtil::luminance(radiance) * sumLightPowerInv, pos, sampled, normal);
 }
 #pragma endregion

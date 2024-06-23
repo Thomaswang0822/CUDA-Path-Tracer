@@ -131,10 +131,30 @@ __global__ void computeIntersections(
 #if BVH_DEBUG_VISUALIZATION
 		scene->visualizedIntersect(pathSegment.ray, intersections[path_index]);
 #else
-		scene->intersect(pathSegment.ray, intersections[path_index]);
-#endif // BVH_DEBUG_VISUALIZATION
+		Intersection intersec;
+		scene->intersect(pathSegment.ray, intersec);
 
-		
+		if (intersec.primId != NullPrimitive) {
+			if (scene->devMaterials[intersec.materialId].type == Material::Type::Light) {
+#if SCENE_LIGHT_SINGLE_SIDED
+				if (glm::dot(intersec.norm, segment.ray.direction) < 0.f) {
+					intersec.primId = NullPrimitive;
+				}
+				else
+#endif // SCENE_LIGHT_SINGLE_SIDED
+					if (depth != 0) {
+						// If not first ray, preserve previous sampling information for
+						// MIS calculation
+						intersec.prevPos = pathSegment.ray.origin;
+						// intersec.prevBSDFPdf = segment.BSDFPdf;
+					}
+			}
+			else {
+				intersec.wo = -pathSegment.ray.direction;
+			}
+		}
+		intersections[path_index] = intersec;
+#endif // BVH_DEBUG_VISUALIZATION
 	}
 }
 
@@ -159,7 +179,7 @@ __global__ void shadeFakeMaterial(
 	if (idx < num_paths)
 	{
 		Intersection intersection = intersections[idx];
-		if (intersection.primitive == NullPrimitive) { // if the intersection exists...
+		if (intersection.primId == NullPrimitive) { // if the intersection exists...
 			// Set up the Sampler
 			Sampler sampler(iter, idx, 0);
 
@@ -191,29 +211,31 @@ __global__ void shadeFakeMaterial(
 
 __global__ void shadeSegment(
 	int iter,
+	int depth,
 	int numPaths,
 	Intersection* intersections,
 	PathSegment* segments,
 	DevScene* scene
 ) {
 	int idx = blockDim.x * blockIdx.x + threadIdx.x;
+	// Should be unnecessary with stream compaction implemented
 	if (idx >= numPaths) {
 		return;
 	}
+
+	// Deal with miss
 	Intersection intersec = intersections[idx];
-	if (intersec.primitive == NullPrimitive) {
-		//segments[idx].throughput = glm::vec3(0.0f);
-		segments[idx].pixelIndex = PixelIdxForTerminated;
+	if (intersec.primId == NullPrimitive) {
+		if (mathUtil::luminance(segments[idx].radiance) < 1e-4f) {
+			// insignificant
+			segments[idx].pixelIndex = PixelIdxForTerminated;
+		}
+		else {
+			// still need to eval
+			segments[idx].remainingBounces = 0;
+		}
 		return;
 	}
-
-	Sampler sampler(iter, idx, segments[idx].remainingBounces);
-	Material& material = scene->devMaterials[intersec.materialId];
-	PathSegment& segment = segments[idx];
-
-	// TODO
-	// Perform light area sampling and MIS
-	//segment.radiance = material.baseColor;
 
 #if BVH_DEBUG_VISUALIZATION
 	float logDepth = 0.f;
@@ -222,52 +244,78 @@ __global__ void shadeSegment(
 		logDepth += 1.f;
 		size >>= 1;
 	}
-	segment.radiance = glm::vec3(float(intersec.primitive) / logDepth * .1f);
-	//segment.radiance = intersec.primitive > 16 ? glm::vec3(1.f) : glm::vec3(0.f);
+	segment.radiance = glm::vec3(float(intersec.primId) / logDepth * .1f);
+	//segment.radiance = intersec.primId > 16 ? glm::vec3(1.f) : glm::vec3(0.f);
 	segment.remainingBounces = 0;
 	return;
 #endif
 
-	if (material.type == Material::Type::Light) {
-		// TODO
-		// MIS
+	Sampler sampler(iter, idx, segments[idx].remainingBounces);
+	Material& material = scene->devMaterials[intersec.materialId];
+	PathSegment& segment = segments[idx];
+	glm::vec3 accRadiance(0.f);
 
-		//segment.throughput *= material.baseColor * material.emittance;
-		segment.radiance += segment.throughput * material.baseColor * material.emittance;
+	//bool deltaBSDF = material.type == Material::Type::Dielectric;
+
+	/// If hit a light source
+	if (material.type == Material::Type::Light) {
+		glm::vec3 radiance = material.baseColor * material.emittance;
+		if (depth == 0) {
+			accRadiance += radiance;
+		}
+		else if (segment.isDeltaSample) {
+			accRadiance += radiance * segment.throughput;
+		}
+		else {
+			float lightPdf = mathUtil::pdfAreaToSolidAngle(mathUtil::luminance(radiance) * scene->sumLightPowerInv,
+				intersec.prevPos, intersec.position, intersec.normal);
+			float BSDFPdf = segment.BSDFpdf;
+			accRadiance += radiance * segment.throughput * mathUtil::powerHeuristic(BSDFPdf, lightPdf);
+		}
 		segment.remainingBounces = 0;
 	}
+	/// Do MIS
 	else {
-		/*/// DEBUG
-		segment.radiance = intersec.normal;
-		segment.remainingBounces = 0;
-		return;*/
-
-		if (material.type != Material::Type::Dielectric && glm::dot(intersec.normal, intersec.inDir) < 0.f) {
+		bool deltaBSDF = (material.type == Material::Type::Dielectric);
+		if (material.type != Material::Type::Dielectric && glm::dot(intersec.normal, intersec.wo) < 0.f) {
 			intersec.normal = -intersec.normal;
 		}
 
+		// Light Sampling
+		if (!deltaBSDF) {
+			glm::vec3 radiance;
+			glm::vec3 wi;
+			float lightPdf = scene->sampleDirectLight(intersec.position, sampler.sample4D(), radiance, wi);
+
+			if (lightPdf > 0.f) {
+				float BSDFPdf = material.pdf(intersec.normal, intersec.wo, wi);
+				accRadiance += segment.throughput *
+					material.BSDF(intersec.normal, intersec.wo, wi) *
+					radiance *
+					mathUtil::nonnegativeDot(intersec.normal, wi) /
+					lightPdf * mathUtil::powerHeuristic(lightPdf, BSDFPdf);
+			}
+		}
+
+		// BSDF sampling
 		BSDFSample sample;
-		materialSample(intersec.normal, intersec.inDir, material, sampler.sample3D(), sample);
+		material.sample(intersec.normal, intersec.wo, sampler.sample3D(), sample);
 
 		if (sample.type == BSDFSampleType::Invalid) {
 			// Terminate path if sampling fails
-			//segment.radiance = DEBUG_RED;
 			segment.remainingBounces = 0;
 		}
-		/// DEBUG
-		/*else if (iter > 0) {
-			segment.radiance = sample.bsdf / sample.pdf;
-			segment.remainingBounces = 0;
-			return;
-		}*/
 		else {
-			bool isSampleDelta = (sample.type & BSDFSampleType::Specular);
+			bool deltaSample = (sample.type & BSDFSampleType::Specular);
 			segment.throughput *= sample.bsdf / sample.pdf *
-				(isSampleDelta ? 1.f : mathUtil::absDot(intersec.normal, sample.dir));
-			segment.ray.nextRay(intersec.position, sample.dir);
+				(deltaSample ? 1.f : mathUtil::absDot(intersec.normal, sample.dir));
+			segment.ray = Ray::makeOffsetRay(intersec.position, sample.dir);
+			segment.BSDFpdf = sample.pdf;
+			segment.isDeltaSample = deltaSample;
 			segment.remainingBounces--;
 		}
 	}
+	segment.radiance += accRadiance;
 }
 
 // Add the current iteration's output to the overall image
@@ -279,7 +327,7 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
 	{
 		PathSegment iterationPath = iterationPaths[index];
 		//image[iterationPath.pixelIndex] += iterationPath.throughput;
-		if (iterationPath.pixelIndex >= 0 && iterationPath.remainingBounces == 0) {
+		if (iterationPath.pixelIndex >= 0 && iterationPath.remainingBounces <= 0) {
 			image[iterationPath.pixelIndex] += iterationPath.radiance;
 		}
 	}
@@ -304,37 +352,6 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 
 	// 1D block for path tracing
 	const int blockSize1d = 128;
-
-	///////////////////////////////////////////////////////////////////////////
-
-	// Recap:
-	// * Initialize array of path rays (using rays that come out of the camera)
-	//   * You can pass the Camera object to that kernel.
-	//   * Each path ray must carry at minimum a (ray, color) pair,
-	//   * where color starts as the multiplicative identity, white = (1, 1, 1).
-	//   * This has already been done for you.
-	// * For each depth:
-	//   * Compute an intersection in the scene for each path ray.
-	//     A very naive version of this has been implemented for you, but feel
-	//     free to add more primitives and/or a better algorithm.
-	//     Currently, intersection distance is recorded as a parametric distance,
-	//     t, or a "distance along the ray." t = -1.0 indicates no intersection.
-	//     * Color is attenuated (multiplied) by reflections off of any object
-	//   * TODO: Stream compact away all of the terminated paths.
-	//     You may use either your implementation or `thrust::remove_if` or its
-	//     cousins.
-	//     * Note that you can't really use a 2D kernel launch any more - switch
-	//       to 1D.
-	//   * TODO: Shade the rays that intersected something or didn't bottom out.
-	//     That is, color the ray by performing a color computation according
-	//     to the shader, then generate a new ray to continue the ray path.
-	//     We recommend just updating the ray's PathSegment in place.
-	//     Note that this step may come before or after stream compaction,
-	//     since some shaders you write may also cause a path to terminate.
-	// * Finally, add this iteration's results to the image. This has been done
-	//   for you.
-
-	// TODO: perform one iteration of path tracing
 
 	generateRayFromCamera <<<blocksPerGrid2d, blockSize2d>>> (cam, iter, traceDepth, paths_alive);
 	checkCUDAError("generateRayFromCamera");
@@ -369,7 +386,7 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 		);
 		checkCUDAError("computeIntersections");
 		cudaDeviceSynchronize();
-		depth++;
+		//depth++;
 
 		// --- Shading Stage ---
 		// Shade path segments based on intersections and generate new rays by
@@ -381,6 +398,7 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 		//shadeFakeMaterial <<<numblocksPathSegmentTracing, blockSize1d>>> (iter, num_paths, dev_intersections, paths_alive, dev_materials);
 		shadeSegment << <numblocksPathSegmentTracing, blockSize1d >> > (
 			iter, 
+			depth,
 			num_paths, 
 			dev_intersections, 
 			paths_alive, 
@@ -407,6 +425,7 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 		//std::cout << "Remaining paths: " << num_paths << "\n";
 
 		iterationComplete = bool(num_paths == 0);
+		depth++;
 
 		if (guiData != nullptr)
 		{

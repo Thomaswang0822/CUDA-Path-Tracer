@@ -21,6 +21,12 @@ struct MeshData {
 #if MESH_DATA_INDEXED
     std::vector<glm::ivec3> indices;
 #endif
+
+    void clear() {
+        vertices.clear();
+        normals.clear();
+        texcoords.clear();
+    }
 };
 
 /**

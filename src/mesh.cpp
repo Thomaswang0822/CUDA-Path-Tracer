@@ -36,11 +36,11 @@ MeshData* Resource::loadOBJMesh(const std::string& filename) {
     memcpy(model->vertices.data(), attrib.vertices.data(), attrib.vertices.size() * sizeof(float));
     memcpy(model->normals.data(), attrib.normals.data(), attrib.normals.size() * sizeof(float));
     if (hasTexcoord) {
-        model->texcoord.resize(attrib.texcoords.size() / 2);
+        model->uv.resize(attrib.texcoords.size() / 2);
         memcpy(model->texcoords.data(), attrib.texcoords.data(), attrib.texcoords.size() * sizeof(float));
     }
     else {
-        model->texcoord.resize(attrib.vertices.size() / 3);
+        model->uv.resize(attrib.vertices.size() / 3);
     }
 
     for (const auto& shape : shapes) {
