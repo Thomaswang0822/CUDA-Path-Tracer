@@ -36,6 +36,7 @@ The parallizable BVH is the biggest reason I picked this repo as my reference.
 - [An awesome algorithm overview](https://computergraphics.stackexchange.com/a/5153/21736): focuses on Monte-Carlo and MIS ideas.
 - [Alias Method](https://keithschwarz.com/darts-dice-coins/): sampling from a discrete distribution in O(1); used for light sampling in the project.
 - [CUDA Unified Memory](https://developer.nvidia.com/blog/unified-memory-cuda-beginners/)
+- [MIS Overview](https://computergraphics.stackexchange.com/a/8631/21736): a great algorithmic overview of MIS with more explanations on derivations.
 
 P.S. Documentation of traditional (CUDA-irrelevant) technical details can be found in my CPU path-tracer README.
 
@@ -59,7 +60,7 @@ Here is the illustration: the rendering converges from ~50 spp (top) to ~5000 sp
 ### scene resources memory management
 
 I used the data structure design by the author directly, and would like to provide some explanation on this part.
-Code of this section can be found in `scene.h, scene.cu` as well as `mesh.h, mesh.cpp`.
+Code of this section can be found in `scene.h`, ~~`scene.cu`~~ `scene.cpp` as well as `mesh.h, mesh.cpp`.
 
 The `class Scene` is a giant container consisting of several classes and structs, like `RenderState, Material, MeshData`, etc.
 If we break a path-tracer into 2 major phases, scene construction and path tracing, all other members in a `Scene` is for scene construction.
@@ -82,7 +83,7 @@ This boils down to the fact that device memory (at least for now) is more limite
 while a 32 GB RAM on PC is a much cheaper and common setup. Say if you have a giant scene that takes 16 GB during construction but
 only 10 GB is used during path tracing on device, you would prefer consuming 16+10 GB on host and only 10 GB on device.
 
-## multi-threaded BVH
+### multi-threaded BVH
 
 This brilliant idea was first proposed by **Toshiya Hachisuka** in 2015. I will elaborate the problem being addressed by MTBVH
 and some implementation details.
@@ -140,11 +141,59 @@ uses the debugging code by HummaWhite to visualize the BVH.
 
 <img src="img/step2_vis_BVH.png" width="600">
 
-## Step 3. MIS support and performance improvement
+## Step 3. MIS and Performance Improvement
 
-TODO:
+<img src="img/step3-256spp-8depth.png" width="800">
 
-- wrong glass teapot, wrong shadow on the red wall; possible cause is EPSILON and offset ray.
-- Try with unified memory. Ask GPT first on whether this will improve speed.
+### MIS
 
-Really couldn't get CUDA debugger work in VS. It's a [bug!](https://forums.developer.nvidia.com/t/nsight-visual-studio-edition-2022-2-error-debugging-buttons-greyed-out-nsight-monitor-does-not-autolaunch-nsight-monitor-shows-0-connections/226034)
+In this major step, I added Multiple Importance Sampling (MIS) on top of 3 physically-based materials -- Lambertian, dielectric, and metallic workflow.
+I wouldn't dive into technical details of MIS, because I have implemented it carefully once and documented in [that README](https://computergraphics.stackexchange.com/a/8631/21736).
+Also, [slides](https://cseweb.ucsd.edu/~tzli/cse168/sp2023/lectures/16_multiple_importance_sampling.pdf) from my advisor Tzu-Mao Li 
+and an [answer from stackexchange](https://computergraphics.stackexchange.com/a/8631/21736) are very helpful.
+
+Another technique worth mentioning is the **Vose's Alias Method** to sample from a discrete distribution in O(1).
+It's used to achieve O(1) runtime when we do light sampling. [This post](https://keithschwarz.com/darts-dice-coins/),
+though lengthy, is an enjoyment to read about effective sampling from a discrete distribution. For algorithm details,
+please look at line comments in `sampler.h`.
+
+### parallelism and performance
+
+Again, I will focus more on CUDA-related details. After finishing all features in this section, I found a huge performance
+deficit comparing to the reference code. Using the identical Cornell Box scene setting, my path tracer achieves ~10 FPS
+while the author's achieves ~16 FPS. Fortunately, with Nsight Compute, I was able to identify the issue: for both kernels
+`computerIntersections()` and `shadeSegment()`, my code uses about twice as much number of registers (#reg).
+This significantly reduces occupancy, which can be interpreted by "the ratio of hardware resources being utilized". I would rather
+not dive deep into all technical terms of an Nvidia GPU, because it will inevitably turn into a lengthy glossary.
+For more details, please refer to [the official glossary](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#glossary).
+The takeaway is, reduced occupancy leads to limited parallelism and higher latency, both of which harm rendering performance.
+
+The cause of this issue is a painful lesson to learn, so I would like to share. TL;DR: put `__device__` functions in header
+files such that "not-so-smart" nvcc compiler can inline them and try to optimize register usage. The full story is, for
+the `struct DevScene` (meaning Scene used on device), the author defines those lengthy `__device__` functions in the header
+file but I followed "the standard" by declaring them in the header file and define them in `scene.cu`. Performance-wise,
+"the standard" doesn't harm on CPU because function arguments are pushed to the stack. On a CPU core, the number of registers
+is really limited, so you run out of registers anyway and have to use the stack, which is also very fast. But on GPU, it really
+makes a difference because arguments of a non-inlined function will be stored in extra local variables and thus take up more registers.
+By simply copying these function definitions back to the header file, my 2 kernels achieved the same number of registers used
+and rendering speed became the same.
+
+Also, Nsight Compute profiling suggested that high register usage is still the performance bottlenck.
+I attempted to increase the occupancy by choossing different block sizes (number of threads in a thread block).
+But Nsight Occupancy Calculator confirmed that it wouldn't happen. Though I didn't reduce register usage
+by much without serious code refactoring, I strongly recommend this Calculator because it delivers lots of very useful
+information clearly. For example, the hardware resource table and this occupancy-vs-registers graph
+is particularly helpful for future optimization.
+
+<img src="img/hw-resource.png" width="600">
+
+<img src="img/occ-reg.png" width="800">
+
+`shadeSegment()` uses 71 registers per thread, which is marked on the graph.
+
+For more details on my debugging via Nsight Compute, see `Nsight-debug/` sub-directory.
+
+### other miscellaneous bugs
+
+I've documented several CUDA-irrelevant bugs in [a separate file](./DebugLog.md). Check it out if you
+are curious.
