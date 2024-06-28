@@ -8,14 +8,6 @@ struct Ray {
     glm::vec3 origin;
     glm::vec3 direction;
 
-    /**
-     * Used on PathSegment.ray: update to next (sampled direction) ray.
-     */
-    __host__ __device__ inline void nextRay(glm::vec3 pos, glm::vec3 dir) {
-        direction = dir;
-        origin = pos + EPSILON * dir;
-    }
-
     /** Get a point at certain distance */
     __host__ __device__ inline glm::vec3 getPoint(float t) const {
         return origin + direction * t;
@@ -25,7 +17,7 @@ struct Ray {
      * @param dir should be normalized.
      */
     __host__ __device__ inline static Ray makeOffsetRay(glm::vec3 orig, glm::vec3 dir) {
-        return { orig + 100.f * EPSILON * dir, dir };
+        return { orig + EPSILON * dir, dir };
     }
 };
 
@@ -66,7 +58,7 @@ struct Camera {
      * Generate a camera ray (random within the pixel). The ray is modified in-place
      */
     __host__ __device__ void generateCameraRay(Ray& ray, 
-            const int x, const int y, glm::vec2 rand2) {
+            const int x, const int y, glm::vec2 rand2) const {
         
         ray.origin = position;
 

@@ -16,7 +16,7 @@ public:
     int TracedDepth;
 };
 
-namespace utilityCore {
+namespace Core {
     extern float clamp(float f, float min, float max);
     extern bool replaceString(std::string& str, const std::string& from, const std::string& to);
     extern glm::vec3 clampRGB(glm::vec3 color);
@@ -26,4 +26,10 @@ namespace utilityCore {
     extern std::string convertIntToString(int number);
     extern std::istream& safeGetline(std::istream& is, std::string& t); //Thanks to http://stackoverflow.com/a/6089413
     extern std::string vec3ToString(const glm::vec3& vec);
+
+    template<typename T>
+    inline size_t byteSizeOf(const std::vector<T>& v) {
+        return v.size() * sizeof(T);
+    }
+
 }

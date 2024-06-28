@@ -96,8 +96,10 @@ void saveImage() {
 	for (int x = 0; x < width; x++) {
 		for (int y = 0; y < height; y++) {
 			int index = x + (y * width);
-			glm::vec3 pix = renderState->image[index];
-			img.setPixel(width - 1 - x, y, pix / float(samples));
+			glm::vec3 colorRawAvg = renderState->image[index] / float(samples);
+			// Do ACES tone mapping and Gamma correction
+			glm::vec3 colorOut = Math::correctGamma(Math::mapACES(colorRawAvg));
+			img.setPixel(width - 1 - x, y, colorOut);
 		}
 	}
 

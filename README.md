@@ -139,3 +139,12 @@ At this step, we are able to render a scene with several complex meshes. The bel
 uses the debugging code by HummaWhite to visualize the BVH.
 
 <img src="img/step2_vis_BVH.png" width="600">
+
+## Step 3. MIS support and performance improvement
+
+TODO:
+
+- wrong glass teapot, wrong shadow on the red wall; possible cause is EPSILON and offset ray.
+- Try with unified memory. Ask GPT first on whether this will improve speed.
+
+Really couldn't get CUDA debugger work in VS. It's a [bug!](https://forums.developer.nvidia.com/t/nsight-visual-studio-edition-2022-2-error-debugging-buttons-greyed-out-nsight-monitor-does-not-autolaunch-nsight-monitor-shows-0-connections/226034)

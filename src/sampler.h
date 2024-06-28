@@ -157,14 +157,14 @@ struct DevLightSampler {
 
         // malloc and copy
         cudaMalloc(&probTable, byteSize);
-        cudaMemcpyHostToDev(probTable, hostSampler.probTable.data(), byteSize);
+        Cuda::memcpyHostToDev(probTable, hostSampler.probTable.data(), byteSize);
         cudaMalloc(&aliasTable, byteSize);
-        cudaMemcpyHostToDev(aliasTable, hostSampler.aliasTable.data(), byteSize);
+        Cuda::memcpyHostToDev(aliasTable, hostSampler.aliasTable.data(), byteSize);
     }
 
     ~DevLightSampler() {
-        cudaSafeFree(probTable);
-        cudaSafeFree(aliasTable);
+        Cuda::safeFree(probTable);
+        Cuda::safeFree(aliasTable);
     }
 
     __device__ int sample(float r1, float r2) {

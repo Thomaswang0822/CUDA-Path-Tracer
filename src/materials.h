@@ -3,23 +3,40 @@
 #include "utilities.h"
 
 #define InvalidPdf -1.f
+#define SCHLICK_APPROX false
 
 
-
+#pragma region materialUtility
 /**
- * vec3 Fresnel term; need to precompute F0.
+ * vec3 Fresnel term used by MetallicWorkflow; need to precompute F0.
  */
 __device__ inline glm::vec3 fresnel(float cosTheta, glm::vec3 f0) {
-    //return f0 + (glm::vec3(1.0f) - f0) * powf(1.0 - cosTheta, 5.0);
-    return glm::mix(f0, glm::vec3(1.f), powf(1.f - cosTheta, 5.f));
+    return f0 + (glm::vec3(1.0f) - f0) * powf(1.0 - cosTheta, 5.f);
+    //return glm::mix(f0, glm::vec3(1.f), powf(1.f - cosTheta, 5.f));
 }
 
 /**
- * float Fresnel term.
+ * float Fresnel term used by Dielectric.
  */
-__device__ inline float fresnel(float cosTheta, float ior) {
+__device__ inline float fresnel(float cosIn, float ior) {
+#if SCHLICK_APPROX
     float f0 = (1.f - ior) / (1.f + ior);
-    return glm::mix(f0, 1.f, powf(1.f - cosTheta, 5.f));
+    f0 = f0 * f0;
+    return f0 + (1.f - f0) * powf(1.0 - cosIn, 5.0);
+#else
+    if (cosIn < 0) {
+        ior = 1.f / ior;
+        cosIn = -cosIn;
+    }
+    float sinIn = glm::sqrt(1.f - cosIn * cosIn);
+    float sinTr = sinIn / ior;
+    if (sinTr >= 1.f) {
+        return 1.f;
+    }
+    float cosTr = glm::sqrt(1.f - sinTr * sinTr);
+    return (Math::square((cosIn - ior * cosTr) / (cosIn + ior * cosTr)) +
+        Math::square((ior * cosIn - cosTr) / (ior * cosIn + cosTr))) * .5f;
+#endif // SCHLICK_APPROX    
 }
 
 __device__ static float schlickG(float cosTheta, float alpha) {
@@ -32,7 +49,7 @@ __device__ inline float smithG(float cosWo, float cosWi, float alpha) {
 }
 
 __device__ static float ggxDistrib(float cosTheta, float alpha) {
-    if (cosTheta < 1e-6f) {
+    if (cosTheta < EPSILON) {
         return 0.f;
     }
     float aa = alpha * alpha;
@@ -44,7 +61,7 @@ __device__ static float ggxDistrib(float cosTheta, float alpha) {
 
 __device__ static float ggxPdf(glm::vec3 n, glm::vec3 m, glm::vec3 wo, float alpha) {
     return ggxDistrib(glm::dot(n, m), alpha) * schlickG(glm::dot(n, wo), alpha) *
-        mathUtil::absDot(m, wo) / mathUtil::absDot(n, wo);
+        Math::absDot(m, wo) / Math::absDot(n, wo);
 }
 
 /**
@@ -57,7 +74,7 @@ __device__ static float ggxPdf(glm::vec3 n, glm::vec3 m, glm::vec3 wo, float alp
 * to implement anisotropic version
 */
 __device__ static glm::vec3 ggxSample(glm::vec3 n, glm::vec3 wo, float alpha, glm::vec2 r) {
-    glm::mat3 transMat = mathUtil::localRefMatrix(n);
+    glm::mat3 transMat = Math::localRefMatrix(n);
     glm::mat3 transInv = glm::inverse(transMat);
 
     glm::vec3 vh = glm::normalize((transInv * wo) * glm::vec3(alpha, alpha, 1.f));
@@ -66,7 +83,7 @@ __device__ static glm::vec3 ggxSample(glm::vec3 n, glm::vec3 wo, float alpha, gl
     glm::vec3 t = lenSq > 0.f ? glm::vec3(-vh.y, vh.x, 0.f) / sqrt(lenSq) : glm::vec3(1.f, 0.f, 0.f);
     glm::vec3 b = glm::cross(vh, t);
 
-    glm::vec2 p = mathUtil::toUnitDisk(r.x, r.y);
+    glm::vec2 p = Math::toUnitDisk(r.x, r.y);
     float s = 0.5f * (vh.z + 1.f);
     p.y = (1.f - s) * glm::sqrt(1.f - p.x * p.x) + s * p.y;
 
@@ -74,6 +91,7 @@ __device__ static glm::vec3 ggxSample(glm::vec3 n, glm::vec3 wo, float alpha, gl
     h = glm::normalize(glm::vec3(h.x * alpha, h.y * alpha, glm::max(0.f, h.z)));
     return transMat * h;
 }
+#pragma endregion
 
 
 /**
@@ -115,40 +133,42 @@ struct Material {
 
     int textureId;
 
+    /// ALL member functions of Material should be made const,
+    /// i.e. not changing any member variables.
 
     std::string toString() const {
         std::stringstream ss;
-        ss << "[Type = " << int(type) << ", BaseColor = " << utilityCore::vec3ToString(baseColor) << "]";
+        ss << "[Type = " << int(type) << ", BaseColor = " << Core::vec3ToString(baseColor) << "]";
         return ss.str();
     }
 
 #pragma region Lambertian
-    __device__ glm::vec3 lambertianBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+    __device__ glm::vec3 lambertianBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) const {
         return baseColor * INV_PI;
     }
 
-    __device__ float lambertianPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
-        return mathUtil::nonnegativeDot(n, wi) * INV_PI;
+    __device__ float lambertianPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) const {
+        return Math::nonnegativeDot(n, wi) * INV_PI;
     }
 
-    __device__ void lambertianSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r, BSDFSample& sample) {
-        sample.dir = mathUtil::sampleHemisphereCosine(n, r.x, r.y);
+    __device__ void lambertianSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r, BSDFSample& sample) const {
+        sample.dir = Math::sampleHemisphereCosine(n, r.x, r.y);
         sample.bsdf = baseColor * INV_PI;
-        sample.pdf = mathUtil::nonnegativeDot(n, sample.dir) * INV_PI;
+        sample.pdf = Math::nonnegativeDot(n, sample.dir) * INV_PI;
         sample.type = Diffuse | Reflection;
     }
 #pragma endregion
 
 #pragma region dielectric
-    __device__ glm::vec3 dielectricBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+    __device__ glm::vec3 dielectricBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) const {
         return glm::vec3(0.f);
     }
 
-    __device__ float dielectricPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
-        return 1.f;
+    __device__ float dielectricPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) const {
+        return 0.f;
     }
 
-    __device__ void dielectricSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r, BSDFSample& sample) {
+    __device__ void dielectricSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r, BSDFSample& sample) const {
         float pdfRefl = fresnel(glm::dot(n, wo), ior);
 
         sample.bsdf = baseColor;
@@ -159,15 +179,14 @@ struct Material {
             sample.pdf = 1.f;
         }
         else {
-            bool result = mathUtil::refract(n, wo, ior, sample.dir);
+            bool result = Math::refract(n, wo, ior, sample.dir);
             if (!result) {
                 sample.type = Invalid;
                 return;
             }
-            if (glm::dot(n, wo) < 0) {
-                ior = 1.f / ior;
-            }
-            sample.bsdf /= ior * ior;
+            // KILLING BUG: should never modify Material field.
+            float tmp_ior = (glm::dot(n, wo) < 0) ? 1.f / ior : ior;
+            sample.bsdf /= tmp_ior * tmp_ior;
             sample.type = Specular | Transmission;
             sample.pdf = 1.f;
         }
@@ -175,7 +194,7 @@ struct Material {
 #pragma endregion
 
 #pragma region metallicWorkflow
-    __device__ glm::vec3 metallicWorkflowBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+    __device__ glm::vec3 metallicWorkflowBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) const {
         float alpha = roughness * roughness;
         glm::vec3 h = glm::normalize(wo + wi);
 
@@ -192,20 +211,20 @@ struct Material {
         return glm::mix(baseColor * INV_PI * (1.f - metallic), glm::vec3(g * d / (4.f * cosI * cosO)), f);
     }
 
-    __device__ float metallicWorkflowPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+    __device__ float metallicWorkflowPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) const {
         glm::vec3 h = glm::normalize(wo + wi);
         return glm::mix(
-            mathUtil::nonnegativeDot(n, wi) * INV_PI,
-            ggxPdf(n, h, wo, roughness * roughness) / (4.f * mathUtil::absDot(h, wo)),
+            Math::nonnegativeDot(n, wi) * INV_PI,
+            ggxPdf(n, h, wo, roughness * roughness) / (4.f * Math::absDot(h, wo)),
             1.f / (2.f - metallic)
         );
     }
 
-    __device__ void metallicWorkflowSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r, BSDFSample& sample) {
+    __device__ void metallicWorkflowSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r, BSDFSample& sample) const {
         float alpha = roughness * roughness;
 
         if (r.z > (1.f / (2.f - metallic))) {
-            sample.dir = mathUtil::sampleHemisphereCosine(n, r.x, r.y);
+            sample.dir = Math::sampleHemisphereCosine(n, r.x, r.y);
         }
         else {
             glm::vec3 h = ggxSample(n, wo, alpha, glm::vec2(r));
@@ -224,7 +243,7 @@ struct Material {
 #pragma endregion
 
 #pragma region globalSwitcher
-    __device__ glm::vec3 BSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+    __device__ glm::vec3 BSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) const {
         switch (type) {
         case Material::Type::Lambertian:
             return lambertianBSDF(n, wo, wi);
@@ -236,7 +255,7 @@ struct Material {
         return glm::vec3(0.f);
     }
 
-    __device__ float pdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+    __device__ float pdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) const {
         switch (type) {
         case Material::Type::Lambertian:
             return lambertianPdf(n, wo, wi);
@@ -248,7 +267,7 @@ struct Material {
         return 0.f;
     }
 
-    __device__ void sample(glm::vec3 n, glm::vec3 wo, glm::vec3 r, BSDFSample& sample) {
+    __device__ void sample(glm::vec3 n, glm::vec3 wo, glm::vec3 r, BSDFSample& sample) const {
         switch (type) {
         case Material::Type::Lambertian:
             lambertianSample(n, wo, r, sample);

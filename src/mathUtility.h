@@ -10,8 +10,9 @@
 #define INV_PI            0.3183098861837906912164442019275156781077f
 #define SQRT_OF_ONE_THIRD 0.5773502691896257645091487805019574556476f
 #define EPSILON           1e-6f
+#define LOW_VALUE         1e-4f
 
-namespace mathUtil {
+namespace Math {
     __host__ __device__ inline float nonnegativeDot(glm::vec3 a, glm::vec3 b) {
         return glm::max(glm::dot(a, b), 0.f);
     }

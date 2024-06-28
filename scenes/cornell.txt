@@ -4,11 +4,11 @@ FovY        22
 LensRadius	0.1
 FocalDist	11
 ApertureMask	Null
-Sample		5000
+Sample		256
 Depth		8
 File        Cornell
 Eye         0 0 10
-Rotation      -90 0 0
+Rotation    -90 0 0
 Up          0 1 0
 
 Material Light
@@ -107,7 +107,7 @@ Scale		3 3 3
 
 Object Back
 model/square.obj
-Material 	Textured2
+Material 	White
 Translate	0 0 -3
 Rotate	90 0 0
 Scale		4 3 3

@@ -7,7 +7,6 @@
 #include <string>
 #include "intersections.h"
 
-#define SCENE_LIGHT_SINGLE_SIDED true
 
 std::map<std::string, Material::Type> MaterialTypeTokenMap = {
     { "Lambertian", Material::Type::Lambertian},
@@ -34,9 +33,9 @@ Scene::Scene(const std::string& filename) {
     }
     while (fp_in.good()) {
         std::string line;
-        utilityCore::safeGetline(fp_in, line);
+        Core::safeGetline(fp_in, line);
         if (!line.empty()) {
-            std::vector<std::string> tokens = utilityCore::tokenizeString(line);
+            std::vector<std::string> tokens = Core::tokenizeString(line);
             if (tokens[0] == "Material") {
                 loadMaterial(tokens[1]);
                 std::cout << " " << std::endl;
@@ -76,7 +75,7 @@ void Scene::buildDevData() {
         // grab material info
         const Material& material = materials[inst.materialId];
         glm::vec3 radianceUnitArea = material.baseColor * material.emittance;
-        float powerUnitArea = mathUtil::luminance(radianceUnitArea) * TWO_PI;
+        float powerUnitArea = Math::luminance(radianceUnitArea);
 
         for (size_t i = 0; i < inst.meshData->vertices.size(); i++) {
             meshData.vertices.push_back(glm::vec3(inst.transform * glm::vec4(inst.meshData->vertices[i], 1.f)));
@@ -89,7 +88,7 @@ void Scene::buildDevData() {
                 glm::vec3 v0 = meshData.vertices[i - 2];
                 glm::vec3 v1 = meshData.vertices[i - 1];
                 glm::vec3 v2 = meshData.vertices[i - 0];
-                float area = mathUtil::triangleArea(v0, v1, v2);
+                float area = Math::triangleArea(v0, v1, v2);
                 float power = powerUnitArea * area;
 
                 lightPrimIds.push_back(primId);
@@ -108,7 +107,7 @@ void Scene::buildDevData() {
     checkCUDAError("BVH Build");
     hostScene.createDevData(*this);
     cudaMalloc(&devScene, sizeof(DevScene));
-    cudaMemcpyHostToDev(devScene, &hostScene, sizeof(DevScene));
+    Cuda::memcpyHostToDev(devScene, &hostScene, sizeof(DevScene));
     checkCUDAError("Allocate device memory and copy everything");
 
     meshData.clear();
@@ -128,7 +127,7 @@ void Scene::buildDevData() {
  */
 void Scene::clear() {
     hostScene.freeDevData();
-    cudaSafeFree(devScene);
+    Cuda::safeFree(devScene);
 }
 
 /**
@@ -140,16 +139,16 @@ void Scene::loadModel(const std::string& objId) {
     ModelInstance instance;
 
     std::string line;
-    utilityCore::safeGetline(fp_in, line);
+    Core::safeGetline(fp_in, line);
 
     std::string filename = line;
     std::cout << "\tFrom file " << filename << std::endl;
     instance.meshData = Resource::loadModelMeshData(filename);
 
     //link material
-    utilityCore::safeGetline(fp_in, line);
+    Core::safeGetline(fp_in, line);
     if (!line.empty() && fp_in.good()) {
-        std::vector<std::string> tokens = utilityCore::tokenizeString(line);
+        std::vector<std::string> tokens = Core::tokenizeString(line);
         if (materialMap.find(tokens[1]) == materialMap.end()) {
             std::cout << "\tMaterial {" << tokens[1] << "} doesn't exist" << std::endl;
             throw;
@@ -159,9 +158,9 @@ void Scene::loadModel(const std::string& objId) {
     }
 
     //load transformations
-    utilityCore::safeGetline(fp_in, line);
+    Core::safeGetline(fp_in, line);
     while (!line.empty() && fp_in.good()) {
-        std::vector<std::string> tokens = utilityCore::tokenizeString(line);
+        std::vector<std::string> tokens = Core::tokenizeString(line);
 
         //load tranformations
         if (tokens[0] == "Translate") {
@@ -175,10 +174,10 @@ void Scene::loadModel(const std::string& objId) {
             instance.scale = glm::vec3(std::stof(tokens[1]), std::stof(tokens[2]), std::stof(tokens[3]));
         }
 
-        utilityCore::safeGetline(fp_in, line);
+        Core::safeGetline(fp_in, line);
     }
 
-    instance.transform = utilityCore::buildTransformationMatrix(
+    instance.transform = Core::buildTransformationMatrix(
         instance.translation, instance.rotation, instance.scale
     );
     instance.transfInv = glm::inverse(instance.transform);
@@ -200,8 +199,8 @@ void Scene::loadCamera() {
     //load static properties
     for (int i = 0; i < 7; i++) {
         string line;
-        utilityCore::safeGetline(fp_in, line);
-        vector<string> tokens = utilityCore::tokenizeString(line);
+        Core::safeGetline(fp_in, line);
+        vector<string> tokens = Core::tokenizeString(line);
         if (strcmp(tokens[0].c_str(), "Resolution") == 0) {
             camera.resolution.x = stoi(tokens[1]);
             camera.resolution.y = stoi(tokens[2]);
@@ -227,9 +226,9 @@ void Scene::loadCamera() {
     }
 
     string line;
-    utilityCore::safeGetline(fp_in, line);
+    Core::safeGetline(fp_in, line);
     while (!line.empty() && fp_in.good()) {
-        vector<string> tokens = utilityCore::tokenizeString(line);
+        vector<string> tokens = Core::tokenizeString(line);
         if (tokens[0] == "Eye") {
             camera.position = glm::vec3(stof(tokens[1]), stof(tokens[2]), stof(tokens[3]));
         }
@@ -240,7 +239,7 @@ void Scene::loadCamera() {
             camera.up = glm::vec3(stof(tokens[1]), stof(tokens[2]), stof(tokens[3]));
         }
 
-        utilityCore::safeGetline(fp_in, line);
+        Core::safeGetline(fp_in, line);
     }
 
     //calculate fov based on resolution
@@ -281,8 +280,8 @@ void Scene::loadMaterial(const std::string& materialId) {
     //load static properties
     for (int i = 0; i < 6; i++) {
         std::string line;
-        utilityCore::safeGetline(fp_in, line);
-        auto tokens = utilityCore::tokenizeString(line);
+        Core::safeGetline(fp_in, line);
+        auto tokens = Core::tokenizeString(line);
         if (tokens[0] == "Type") {
             std::cout << "\t\t[Type " << tokens[1] << "]" << std::endl;
             material.type = MaterialTypeTokenMap[tokens[1]];
@@ -333,53 +332,53 @@ void DevScene::createDevData(const Scene& scene) {
         textureOffset += tex->byteSize();
     }
     cudaMalloc(&devTextureObjs, textureObjs.size() * sizeof(DevTextureObj));
-    cudaMemcpyHostToDev(devTextureObjs, textureObjs.data(), textureObjs.size() * sizeof(DevTextureObj));
+    Cuda::memcpyHostToDev(devTextureObjs, textureObjs.data(), textureObjs.size() * sizeof(DevTextureObj));
     checkCUDAError("DevScene::texture");
 
-    cudaMalloc(&devMaterials, byteSizeOf(scene.materials));
-    cudaMemcpyHostToDev(devMaterials, scene.materials.data(), byteSizeOf(scene.materials));
+    cudaMalloc(&devMaterials, Core::byteSizeOf(scene.materials));
+    Cuda::memcpyHostToDev(devMaterials, scene.materials.data(), Core::byteSizeOf(scene.materials));
     checkCUDAError("DevScene::materials");
 
-    cudaMalloc(&devMaterialIds, byteSizeOf(scene.materialIds));
-    cudaMemcpyHostToDev(devMaterialIds, scene.materialIds.data(), byteSizeOf(scene.materialIds));
+    cudaMalloc(&devMaterialIds, Core::byteSizeOf(scene.materialIds));
+    Cuda::memcpyHostToDev(devMaterialIds, scene.materialIds.data(), Core::byteSizeOf(scene.materialIds));
     checkCUDAError("DevScene::materialIds");
 
-    cudaMalloc(&devVertices, byteSizeOf(scene.meshData.vertices));
-    cudaMemcpyHostToDev(devVertices, scene.meshData.vertices.data(), byteSizeOf(scene.meshData.vertices));
+    cudaMalloc(&devVertices, Core::byteSizeOf(scene.meshData.vertices));
+    Cuda::memcpyHostToDev(devVertices, scene.meshData.vertices.data(), Core::byteSizeOf(scene.meshData.vertices));
     checkCUDAError("DevScene::vertices");
 
-    cudaMalloc(&devNormals, byteSizeOf(scene.meshData.normals));
-    cudaMemcpyHostToDev(devNormals, scene.meshData.normals.data(), byteSizeOf(scene.meshData.normals));
+    cudaMalloc(&devNormals, Core::byteSizeOf(scene.meshData.normals));
+    Cuda::memcpyHostToDev(devNormals, scene.meshData.normals.data(), Core::byteSizeOf(scene.meshData.normals));
     checkCUDAError("DevScene::normals");
 
-    cudaMalloc(&devTexcoords, byteSizeOf(scene.meshData.texcoords));
-    cudaMemcpyHostToDev(devTexcoords, scene.meshData.texcoords.data(), byteSizeOf(scene.meshData.texcoords));
+    cudaMalloc(&devTexcoords, Core::byteSizeOf(scene.meshData.texcoords));
+    Cuda::memcpyHostToDev(devTexcoords, scene.meshData.texcoords.data(), Core::byteSizeOf(scene.meshData.texcoords));
     checkCUDAError("DevScene::texcoords");
 
-    cudaMalloc(&devBoundingBoxes, byteSizeOf(scene.boundingBoxes));
-    cudaMemcpyHostToDev(devBoundingBoxes, scene.boundingBoxes.data(), byteSizeOf(scene.boundingBoxes));
+    cudaMalloc(&devBoundingBoxes, Core::byteSizeOf(scene.boundingBoxes));
+    Cuda::memcpyHostToDev(devBoundingBoxes, scene.boundingBoxes.data(), Core::byteSizeOf(scene.boundingBoxes));
     checkCUDAError("DevScene::boundingBoxes");
 
     for (int i = 0; i < NUM_FACES; i++) {
-        cudaMalloc(&devBVHNodes[i], byteSizeOf(scene.BVHNodes[i]));
-        cudaMemcpyHostToDev(devBVHNodes[i], scene.BVHNodes[i].data(), byteSizeOf(scene.BVHNodes[i]));
+        cudaMalloc(&devBVHNodes[i], Core::byteSizeOf(scene.BVHNodes[i]));
+        Cuda::memcpyHostToDev(devBVHNodes[i], scene.BVHNodes[i].data(), Core::byteSizeOf(scene.BVHNodes[i]));
     }
     BVHSize = int(scene.BVHSize);
     checkCUDAError("DevScene::BVHNodes[6]");
 
-    cudaMalloc(&devLightPrimIds, byteSizeOf(scene.lightPrimIds));
-    cudaMemcpyHostToDev(devLightPrimIds, scene.lightPrimIds.data(), byteSizeOf(scene.lightPrimIds));
+    cudaMalloc(&devLightPrimIds, Core::byteSizeOf(scene.lightPrimIds));
+    Cuda::memcpyHostToDev(devLightPrimIds, scene.lightPrimIds.data(), Core::byteSizeOf(scene.lightPrimIds));
 
-    cudaMalloc(&devLightUnitRadiance, byteSizeOf(scene.lightUnitRadiance));
-    cudaMemcpyHostToDev(devLightUnitRadiance, scene.lightPower.data(), byteSizeOf(scene.lightUnitRadiance));
+    cudaMalloc(&devLightUnitRadiance, Core::byteSizeOf(scene.lightUnitRadiance));
+    Cuda::memcpyHostToDev(devLightUnitRadiance, scene.lightUnitRadiance.data(), Core::byteSizeOf(scene.lightUnitRadiance));
 
-    cudaMalloc(&devProbTable, byteSizeOf(scene.lightSampler.probTable));
-    cudaMemcpyHostToDev(devProbTable, scene.lightSampler.probTable.data(),
-        byteSizeOf(scene.lightSampler.probTable));
+    cudaMalloc(&devProbTable, Core::byteSizeOf(scene.lightSampler.probTable));
+    Cuda::memcpyHostToDev(devProbTable, scene.lightSampler.probTable.data(),
+        Core::byteSizeOf(scene.lightSampler.probTable));
     
-    cudaMalloc(&devAliasTable, byteSizeOf(scene.lightSampler.aliasTable));
-    cudaMemcpyHostToDev(devAliasTable, scene.lightSampler.aliasTable.data(),
-        byteSizeOf(scene.lightSampler.aliasTable));
+    cudaMalloc(&devAliasTable, Core::byteSizeOf(scene.lightSampler.aliasTable));
+    Cuda::memcpyHostToDev(devAliasTable, scene.lightSampler.aliasTable.data(),
+        Core::byteSizeOf(scene.lightSampler.aliasTable));
     
     numLightPrims = scene.numLightPrims;
     sumLightPowerInv = 1.f / scene.sumLightPower;
@@ -387,27 +386,27 @@ void DevScene::createDevData(const Scene& scene) {
 }
 
 /**
- * Brainless cudaSafeFree().
+ * Brainless Cuda::safeFree().
  */
 void DevScene::freeDevData() {
-    cudaSafeFree(devTextureData);
-    cudaSafeFree(devTextureObjs);
-    cudaSafeFree(devMaterials);
-    cudaSafeFree(devMaterialIds);
+    Cuda::safeFree(devTextureData);
+    Cuda::safeFree(devTextureObjs);
+    Cuda::safeFree(devMaterials);
+    Cuda::safeFree(devMaterialIds);
 
-    cudaSafeFree(devVertices);
-    cudaSafeFree(devNormals);
-    cudaSafeFree(devTexcoords);
-    cudaSafeFree(devBoundingBoxes);
+    Cuda::safeFree(devVertices);
+    Cuda::safeFree(devNormals);
+    Cuda::safeFree(devTexcoords);
+    Cuda::safeFree(devBoundingBoxes);
 
     for (int i = 0; i < NUM_FACES; i++) {
-        cudaSafeFree(devBVHNodes[i]);
+        Cuda::safeFree(devBVHNodes[i]);
     }
 
-    cudaSafeFree(devLightPrimIds);
-    cudaSafeFree(devLightUnitRadiance);
-    cudaSafeFree(devProbTable);
-    cudaSafeFree(devAliasTable);
+    Cuda::safeFree(devLightPrimIds);
+    Cuda::safeFree(devLightUnitRadiance);
+    Cuda::safeFree(devProbTable);
+    Cuda::safeFree(devAliasTable);
 }
 
 /**
@@ -420,55 +419,16 @@ void DevScene::freeDevData() {
  * |dir.x| dominates, then (dir.x > 0) ? 0 : 1
  * similar stories for dir.y and dir.z
  */
-__device__ int DevScene::getMTBVHId(glm::vec3 dir) {
-    glm::vec3 absDir = glm::abs(dir);
-    if (absDir.x > absDir.y) {
-        if (absDir.x > absDir.z) {
-            return dir.x > 0 ? 0 : 1;
-        }
-        else {
-            return dir.z > 0 ? 4 : 5;
-        }
-    }
-    else {
-        if (absDir.y > absDir.z) {
-            return dir.y > 0 ? 2 : 3;
-        }
-        else {
-            return dir.z > 0 ? 4 : 5;
-        }
-    }
-}
+//__device__ int DevScene::getMTBVHId(glm::vec3 dir)
 
-__device__ glm::vec3 DevScene::getPrimitiveNormal(const int primId) {
-    glm::vec3 v0 = devVertices[primId * 3 + 0];
-    glm::vec3 v1 = devVertices[primId * 3 + 1];
-    glm::vec3 v2 = devVertices[primId * 3 + 2];
-    return glm::normalize(glm::cross(v1 - v0, v2 - v0));
-}
+//__device__ glm::vec3 DevScene::getPrimitiveNormal(const int primId)
 
 /**
  * After intersection test, fetch info of intersected triangle.
  * 
  * @param intersec Output parameter to be updated
  */
-__device__ void DevScene::getIntersecGeomInfo(int primId, const glm::vec2 bary, Intersection& intersec) {
-    glm::vec3 va = devVertices[primId * 3 + 0];
-    glm::vec3 vb = devVertices[primId * 3 + 1];
-    glm::vec3 vc = devVertices[primId * 3 + 2];
-
-    glm::vec3 na = devNormals[primId * 3 + 0];
-    glm::vec3 nb = devNormals[primId * 3 + 1];
-    glm::vec3 nc = devNormals[primId * 3 + 2];
-
-    glm::vec2 ta = devTexcoords[primId * 3 + 0];
-    glm::vec2 tb = devTexcoords[primId * 3 + 1];
-    glm::vec2 tc = devTexcoords[primId * 3 + 2];
-
-    intersec.position = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
-    intersec.normal = nb * bary.x + nc * bary.y + na * (1.f - bary.x - bary.y);
-    intersec.uv = tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
-}
+//__device__ void DevScene::getIntersecGeomInfo(int primId, const glm::vec2 bary, Intersection& intersec)
 
 /**
  * Grab the triangle from the vertices pool and perform ray-triangle test.
@@ -476,210 +436,30 @@ __device__ void DevScene::getIntersecGeomInfo(int primId, const glm::vec2 bary, 
  * @param dist Output parameter to be updated (if a closer hit occurs)
  * @param bary Output parameter to be updated (if a closer hit occurs)
  */
-__device__ bool DevScene::intersectPrimitive(int primId, const Ray& ray, float& dist, glm::vec2& bary) {
-    glm::vec3 va = devVertices[primId * 3 + 0];
-    glm::vec3 vb = devVertices[primId * 3 + 1];
-    glm::vec3 vc = devVertices[primId * 3 + 2];
+//__device__ bool DevScene::intersectPrimitive(int primId, const Ray& ray, float& dist, glm::vec2& bary)
 
-    /*if (!intersectTriangle(ray, va, vb, vc, bary, dist)) {
-        return false;
-    }
-    glm::vec3 hitPoint = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
-    return true;*/
-    
-    return intersectTriangle(ray, va, vb, vc, bary, dist);
-}
-
-__device__ bool DevScene::intersectPrimitive(int primId, const Ray& ray, float distRange) {
-    glm::vec3 va = devVertices[primId * 3 + 0];
-    glm::vec3 vb = devVertices[primId * 3 + 1];
-    glm::vec3 vc = devVertices[primId * 3 + 2];
-
-    glm::vec2 bary;
-    float dist;
-    bool hit = intersectTriangle(ray, va, vb, vc, bary, dist);
-    return (hit && dist < distRange);
-}
+//__device__ bool DevScene::intersectPrimitive(int primId, const Ray& ray, float distRange)
 
 /** NOT USED YET */
-__device__ bool DevScene::intersectPrimitiveDetailed(int primId, const Ray& ray, Intersection& intersec) {
-    glm::vec3 va = devVertices[primId * 3 + 0];
-    glm::vec3 vb = devVertices[primId * 3 + 1];
-    glm::vec3 vc = devVertices[primId * 3 + 2];
-    float dist;
-    glm::vec2 bary;
-
-    if (!intersectTriangle(ray, va, vb, vc, bary, dist)) {
-        return false;
-    }
-
-    glm::vec3 na = devNormals[primId * 3 + 0];
-    glm::vec3 nb = devNormals[primId * 3 + 1];
-    glm::vec3 nc = devNormals[primId * 3 + 2];
-
-    glm::vec2 ta = devTexcoords[primId * 3 + 0];
-    glm::vec2 tb = devTexcoords[primId * 3 + 1];
-    glm::vec2 tc = devTexcoords[primId * 3 + 2];
-
-    intersec.position = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
-    intersec.normal = nb * bary.x + nc * bary.y + na * (1.f - bary.x - bary.y);
-    intersec.uv = tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
-    return true;
-}
+//__device__ bool DevScene::intersectPrimitiveDetailed(int primId, const Ray& ray, Intersection& intersec)
 
 /**
  * Given a ray, find the cloest intersection, if one exist, in the entire scene.
  * 
  * @param intersec Output parameter
  */
-__device__ void DevScene::intersect(const Ray& ray, Intersection& intersec) {
-    float closestDist = FLT_MAX;
-    int closestPrimId = NullPrimitive;
-    glm::vec2 closestBary;
-
-    MTBVHNode* nodes = devBVHNodes[getMTBVHId(-ray.direction)];
-    int node = 0;
-
-    while (node != BVHSize) {
-        AABB& bound = devBoundingBoxes[nodes[node].boundingBoxId];
-        float boundDist;
-        bool boundHit = bound.intersect(ray, boundDist);
-
-        // Only intersect a primitive if its bounding box is hit and
-        // that box is closer than previous hit record
-        if (boundHit && boundDist < closestDist) {
-            int primId = nodes[node].primitiveId;
-            if (primId != NullPrimitive) {
-                float dist;
-                glm::vec2 bary;
-                // hit info is written to dist and bary.
-                bool hit = intersectPrimitive(primId, ray, dist, bary);
-
-                if (hit && dist < closestDist) {
-                    closestDist = dist;
-                    closestBary = bary;
-                    closestPrimId = primId;
-                }
-            }
-            node++;
-        }
-        else {
-            node = nodes[node].nextNodeIfMiss;
-        }
-    }
-    if (closestPrimId != NullPrimitive) {
-        getIntersecGeomInfo(closestPrimId, closestBary, intersec);
-        intersec.primId = closestPrimId;
-        //intersec.inDir = -ray.direction;
-        intersec.materialId = devMaterialIds[closestPrimId];
-    }
-    else {
-        intersec.primId = NullPrimitive;
-    }
-}
+//__device__ void DevScene::intersect(const Ray& ray, Intersection& intersec)
 
 /**
  * Shoot a ray from x to y and test occulsion.
  */
-__device__ bool DevScene::testOcclusion(glm::vec3 x, glm::vec3 y) {
-    glm::vec3 dir = glm::normalize(y - x);
-    float dist = glm::length(y - x);
-    Ray ray = Ray::makeOffsetRay(x, dir);
-    bool hit = false;
-
-    MTBVHNode* nodes = devBVHNodes[getMTBVHId(-ray.direction)];
-    int node = 0;
-    while (node != BVHSize) {
-        AABB& bound = devBoundingBoxes[nodes[node].boundingBoxId];
-        float boundDist;
-        bool boundHit = bound.intersect(ray, boundDist);
-
-        if (boundHit && boundDist < dist) {
-            int primId = nodes[node].primitiveId;
-            if (primId != NullPrimitive) {
-                hit |= intersectPrimitive(primId, ray, dist);
-            }
-            node++;
-        }
-        else {
-            node = nodes[node].nextNodeIfMiss;
-        }
-    }
-    return hit;
-}
+//__device__ bool DevScene::testOcclusion(glm::vec3 x, glm::vec3 y)
 
 /**
  * DEBUG version intersection test.
  * 
  * intersec.primId will be written with #triangles hit
  */
-__device__ void DevScene::visualizedIntersect(const Ray& ray, Intersection& intersec) {
-    float closestDist = FLT_MAX;
-    int closestPrimId = NullPrimitive;
-    glm::vec2 closestBary;
-
-    MTBVHNode* nodes = devBVHNodes[getMTBVHId(-ray.direction)];
-    int node = 0;
-    int maxDepth = 0;
-
-    while (node != BVHSize) {
-        AABB& bound = devBoundingBoxes[nodes[node].boundingBoxId];
-        float boundDist;
-        bool boundHit = bound.intersect(ray, boundDist);
-
-        // Only intersect a primitive if its bounding box is hit and
-        // that box is closer than previous hit record
-        if (boundHit && boundDist < closestDist) {
-            int primId = nodes[node].primitiveId;
-            if (primId != NullPrimitive) {
-                float dist;
-                glm::vec2 bary;
-                bool hit = intersectPrimitive(primId, ray, dist, bary);
-
-                if (hit && dist < closestDist) {
-                    closestDist = dist;
-                    closestBary = bary;
-                    closestPrimId = primId;
-                    maxDepth += 1.f;
-                }
-            }
-            node++;
-            maxDepth += 1.f;
-        }
-        else {
-            node = nodes[node].nextNodeIfMiss;
-        }
-    }
-    if (closestPrimId == 0) {
-        maxDepth = 100.f;
-    }
-    intersec.primId = maxDepth;
-}
-__device__ float DevScene::sampleDirectLight(glm::vec3 pos, glm::vec4 r, glm::vec3& radiance, glm::vec3& wi) {
-    int bucketId = static_cast<int>(r.x * numLightPrims);
-    int lightId = (r.y < devProbTable[bucketId]) ? bucketId : devAliasTable[bucketId];
-    int primId = devLightPrimIds[lightId];
-
-    glm::vec3 v0 = devVertices[primId * 3 + 0];
-    glm::vec3 v1 = devVertices[primId * 3 + 1];
-    glm::vec3 v2 = devVertices[primId * 3 + 2];
-    glm::vec3 sampled = mathUtil::sampleTriangleUniform(v0, v1, v2, r.z, r.w);
-
-    if (testOcclusion(pos, sampled)) {
-        return InvalidPdf;
-    }
-    glm::vec3 normal = mathUtil::triangleNormal(v0, v1, v2);
-    glm::vec3 posToSampled = sampled - pos;
-
-#if SCENE_LIGHT_SINGLE_SIDED
-    if (glm::dot(normal, posToSampled) > 0.f) {
-        return InvalidPdf;
-    }
-#endif
-    float area = mathUtil::triangleArea(v0, v1, v2);
-    radiance = devLightUnitRadiance[lightId];
-    wi = glm::normalize(posToSampled);
-    float power = mathUtil::luminance(radiance) / (area * TWO_PI);
-    return mathUtil::pdfAreaToSolidAngle(power * sumLightPowerInv, pos, sampled, normal);
-}
+//__device__ void DevScene::visualizedIntersect(const Ray& ray, Intersection& intersec)
+//__device__ float DevScene::sampleDirectLight(glm::vec3 pos, glm::vec4 r, glm::vec3& radiance, glm::vec3& wi)
 #pragma endregion

@@ -1,6 +1,6 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.24)
 
-project(cuda_path_tracer)
+project(cuda_path_tracer CUDA CXX C)  # enable cuda language
 enable_language(CUDA)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -11,8 +11,9 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# Enable C++11 for host code
+# Enable C++17 for host code
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 17)
 
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -27,21 +28,16 @@ add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 ########################################
 # CUDA Setup
 ########################################
-find_package(CUDA REQUIRED)
-include_directories(${CUDA_INCLUDE_DIRS})
-include(${CMAKE_MODULE_PATH}/CUDAComputesList.cmake)
+find_package(CUDAToolkit REQUIRED)
+include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 
 # Add CUDA library directory
 link_directories(${CUDA_TOOLKIT_ROOT_DIR}/lib/x64)
 
-list(APPEND CUDA_NVCC_FLAGS ${CUDA_GENERATE_CODE})
-list(APPEND CUDA_NVCC_FLAGS_DEBUG "-g -G")
 set(CUDA_VERBOSE_BUILD ON)
 
-if(WIN32)
-    # Set up include and lib paths
-    set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER} CACHE FILEPATH "Host side compiler used by NVCC" FORCE)
-endif(WIN32)
+# Add this line to include the debug flag for all builds
+# set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G")
 ########################################
 
 find_package(OpenGL REQUIRED)
@@ -100,13 +96,12 @@ source_group(Sources FILES ${sources})
 #add_subdirectory(stream_compaction)  # TODO: uncomment if using your stream compaction
 
 add_executable(${CMAKE_PROJECT_NAME} ${sources} ${headers})
+set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON
+)
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
     ${LIBRARIES}
     ${CUDA_LIBRARIES}
     #stream_compaction  # TODO: uncomment if using your stream compaction
-    )
-
-set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ON
 )

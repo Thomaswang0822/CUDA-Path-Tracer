@@ -37,9 +37,9 @@ struct AABB {
     /** Helpers */
     std::string toString() const {
         std::stringstream ss;
-        ss << "[AABB " << "pMin = " << utilityCore::vec3ToString(minPos);
-        ss << ", pMax = " << utilityCore::vec3ToString(maxPos);
-        ss << ", center = " << utilityCore::vec3ToString(this->center()) << "]";
+        ss << "[AABB " << "pMin = " << Core::vec3ToString(minPos);
+        ss << ", pMax = " << Core::vec3ToString(maxPos);
+        ss << ", center = " << Core::vec3ToString(this->center()) << "]";
         return ss.str();
     }
 

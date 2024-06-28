@@ -11,6 +11,9 @@
 #include "camera.h"
 #include "mesh.h"
 #include "sampler.h"
+#include "intersections.h"
+
+#define SCENE_LIGHT_SINGLE_SIDED true
 
 class Scene;  // declare for DevScene
 
@@ -42,16 +45,273 @@ struct DevScene {
 
     void createDevData(const Scene& scene);
     void freeDevData();
-    __device__ int getMTBVHId(glm::vec3 dir);
-    __device__ glm::vec3 getPrimitiveNormal(const int primId);
-    __device__ void getIntersecGeomInfo(int primId, const glm::vec2 bary, Intersection& intersec);
-    __device__ bool intersectPrimitive(int primId, const Ray& ray, float& dist, glm::vec2& bary);
-    __device__ bool intersectPrimitive(int primId, const Ray& ray, float distRange);
-    __device__ bool intersectPrimitiveDetailed(int primId, const Ray& ray, Intersection& intersec);
-    __device__ void intersect(const Ray& ray, Intersection& intersec);
-    __device__ bool testOcclusion(glm::vec3 x, glm::vec3 y);
-    __device__ void visualizedIntersect(const Ray& ray, Intersection& intersec);
-    __device__ float sampleDirectLight(glm::vec3 pos, glm::vec4 r, glm::vec3& radiance, glm::vec3& wi);
+
+
+    __device__ int getMTBVHId(glm::vec3 dir) {
+        glm::vec3 absDir = glm::abs(dir);
+        if (absDir.x > absDir.y) {
+            if (absDir.x > absDir.z) {
+                return dir.x > 0 ? 0 : 1;
+            }
+            else {
+                return dir.z > 0 ? 4 : 5;
+            }
+        }
+        else {
+            if (absDir.y > absDir.z) {
+                return dir.y > 0 ? 2 : 3;
+            }
+            else {
+                return dir.z > 0 ? 4 : 5;
+            }
+        }
+    }
+
+    __device__ glm::vec3 getPrimitiveNormal(const int primId) {
+        glm::vec3 v0 = devVertices[primId * 3 + 0];
+        glm::vec3 v1 = devVertices[primId * 3 + 1];
+        glm::vec3 v2 = devVertices[primId * 3 + 2];
+        return glm::normalize(glm::cross(v1 - v0, v2 - v0));
+    }
+
+    __device__ void getIntersecGeomInfo(int primId, const glm::vec2 bary, Intersection& intersec) {
+        glm::vec3 va = devVertices[primId * 3 + 0];
+        glm::vec3 vb = devVertices[primId * 3 + 1];
+        glm::vec3 vc = devVertices[primId * 3 + 2];
+
+        glm::vec3 na = devNormals[primId * 3 + 0];
+        glm::vec3 nb = devNormals[primId * 3 + 1];
+        glm::vec3 nc = devNormals[primId * 3 + 2];
+
+        glm::vec2 ta = devTexcoords[primId * 3 + 0];
+        glm::vec2 tb = devTexcoords[primId * 3 + 1];
+        glm::vec2 tc = devTexcoords[primId * 3 + 2];
+
+        intersec.position = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
+        intersec.normal = nb * bary.x + nc * bary.y + na * (1.f - bary.x - bary.y);
+        intersec.uv = tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
+    }
+
+    __device__ bool intersectPrimitive(int primId, const Ray& ray, float& dist, glm::vec2& bary) {
+        glm::vec3 va = devVertices[primId * 3 + 0];
+        glm::vec3 vb = devVertices[primId * 3 + 1];
+        glm::vec3 vc = devVertices[primId * 3 + 2];
+
+        /*if (!intersectTriangle(ray, va, vb, vc, bary, dist)) {
+            return false;
+        }
+        glm::vec3 hitPoint = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
+        return true;*/
+
+        return intersectTriangle(ray, va, vb, vc, bary, dist);
+    }
+
+    __device__ bool intersectPrimitive(int primId, const Ray& ray, float distRange) {
+        glm::vec3 va = devVertices[primId * 3 + 0];
+        glm::vec3 vb = devVertices[primId * 3 + 1];
+        glm::vec3 vc = devVertices[primId * 3 + 2];
+
+        glm::vec2 bary;
+        float dist;
+        bool hit = intersectTriangle(ray, va, vb, vc, bary, dist);
+        return (hit && dist < distRange);
+    }
+
+    __device__ bool intersectPrimitiveDetailed(int primId, const Ray& ray, Intersection& intersec) {
+        glm::vec3 va = devVertices[primId * 3 + 0];
+        glm::vec3 vb = devVertices[primId * 3 + 1];
+        glm::vec3 vc = devVertices[primId * 3 + 2];
+        float dist;
+        glm::vec2 bary;
+
+        if (!intersectTriangle(ray, va, vb, vc, bary, dist)) {
+            return false;
+        }
+
+        glm::vec3 na = devNormals[primId * 3 + 0];
+        glm::vec3 nb = devNormals[primId * 3 + 1];
+        glm::vec3 nc = devNormals[primId * 3 + 2];
+
+        glm::vec2 ta = devTexcoords[primId * 3 + 0];
+        glm::vec2 tb = devTexcoords[primId * 3 + 1];
+        glm::vec2 tc = devTexcoords[primId * 3 + 2];
+
+        intersec.position = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
+        intersec.normal = nb * bary.x + nc * bary.y + na * (1.f - bary.x - bary.y);
+        intersec.uv = tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
+        return true;
+    }
+
+    __device__ void naiveIntersect(Ray ray, Intersection& intersec) {
+        float closestDist = FLT_MAX;
+        int closestPrimId = NullPrimitive;
+        glm::vec2 closestBary;
+
+        for (int i = 0; i < (BVHSize + 1) / 2; i++) {
+            float dist;
+            glm::vec2 bary;
+            bool hit = intersectPrimitive(i, ray, dist, bary);
+
+            if (hit && dist < closestDist) {
+                closestDist = dist;
+                closestBary = bary;
+                closestPrimId = i;
+            }
+        }
+
+        if (closestPrimId != NullPrimitive) {
+            getIntersecGeomInfo(closestPrimId, closestBary, intersec);
+            intersec.primId = closestPrimId;
+            intersec.materialId = devMaterialIds[closestPrimId];
+        }
+        else {
+            intersec.primId = NullPrimitive;
+        }
+    }
+
+    __device__ void intersect(const Ray& ray, Intersection& intersec) {
+        float closestDist = FLT_MAX;
+        int closestPrimId = NullPrimitive;
+        glm::vec2 closestBary;
+
+        MTBVHNode* nodes = devBVHNodes[getMTBVHId(-ray.direction)];
+        int node = 0;
+
+        while (node != BVHSize) {
+            AABB& bound = devBoundingBoxes[nodes[node].boundingBoxId];
+            float boundDist;
+            bool boundHit = bound.intersect(ray, boundDist);
+
+            // Only intersect a primitive if its bounding box is hit and
+            // that box is closer than previous hit record
+            if (boundHit && boundDist < closestDist) {
+                int primId = nodes[node].primitiveId;
+                if (primId != NullPrimitive) {
+                    float dist;
+                    glm::vec2 bary;
+                    // hit info is written to dist and bary.
+                    bool hit = intersectPrimitive(primId, ray, dist, bary);
+
+                    if (hit && dist < closestDist) {
+                        closestDist = dist;
+                        closestBary = bary;
+                        closestPrimId = primId;
+                    }
+                }
+                node++;
+            }
+            else {
+                node = nodes[node].nextNodeIfMiss;
+            }
+        }
+        if (closestPrimId != NullPrimitive) {
+            getIntersecGeomInfo(closestPrimId, closestBary, intersec);
+            intersec.primId = closestPrimId;
+            //intersec.inDir = -ray.direction;
+            intersec.materialId = devMaterialIds[closestPrimId];
+        }
+        else {
+            intersec.primId = NullPrimitive;
+        }
+    }
+
+    __device__ bool testOcclusion(glm::vec3 x, glm::vec3 y) {
+        glm::vec3 dir = glm::normalize(y - x);
+        float dist = glm::length(y - x) - EPSILON * 2.f;   // BUG
+        Ray ray = Ray::makeOffsetRay(x, dir);
+        bool hit = false;
+
+        MTBVHNode* nodes = devBVHNodes[getMTBVHId(-ray.direction)];
+        int node = 0;
+        while (node != BVHSize) {
+            AABB& bound = devBoundingBoxes[nodes[node].boundingBoxId];
+            float boundDist;
+            bool boundHit = bound.intersect(ray, boundDist);
+
+            if (boundHit && boundDist < dist) {
+                int primId = nodes[node].primitiveId;
+                if (primId != NullPrimitive) {
+                    hit |= intersectPrimitive(primId, ray, dist);
+                }
+                node++;
+            }
+            else {
+                node = nodes[node].nextNodeIfMiss;
+            }
+        }
+        return hit;
+    }
+
+    __device__ void visualizedIntersect(const Ray& ray, Intersection& intersec) {
+        float closestDist = FLT_MAX;
+        int closestPrimId = NullPrimitive;
+        glm::vec2 closestBary;
+
+        MTBVHNode* nodes = devBVHNodes[getMTBVHId(-ray.direction)];
+        int node = 0;
+        int maxDepth = 0;
+
+        while (node != BVHSize) {
+            AABB& bound = devBoundingBoxes[nodes[node].boundingBoxId];
+            float boundDist;
+            bool boundHit = bound.intersect(ray, boundDist);
+
+            // Only intersect a primitive if its bounding box is hit and
+            // that box is closer than previous hit record
+            if (boundHit && boundDist < closestDist) {
+                int primId = nodes[node].primitiveId;
+                if (primId != NullPrimitive) {
+                    float dist;
+                    glm::vec2 bary;
+                    bool hit = intersectPrimitive(primId, ray, dist, bary);
+
+                    if (hit && dist < closestDist) {
+                        closestDist = dist;
+                        closestBary = bary;
+                        closestPrimId = primId;
+                        maxDepth += 1.f;
+                    }
+                }
+                node++;
+                maxDepth += 1.f;
+            }
+            else {
+                node = nodes[node].nextNodeIfMiss;
+            }
+        }
+        if (closestPrimId == 0) {
+            maxDepth = 100.f;
+        }
+        intersec.primId = maxDepth;
+    }
+
+    __device__ float sampleDirectLight(glm::vec3 pos, glm::vec4 r, glm::vec3& radiance, glm::vec3& wi) {
+        int bucketId = static_cast<int>(r.x * numLightPrims);
+        int lightId = (r.y < devProbTable[bucketId]) ? bucketId : devAliasTable[bucketId];
+        int primId = devLightPrimIds[lightId];
+
+        glm::vec3 v0 = devVertices[primId * 3 + 0];
+        glm::vec3 v1 = devVertices[primId * 3 + 1];
+        glm::vec3 v2 = devVertices[primId * 3 + 2];
+        glm::vec3 sampled = Math::sampleTriangleUniform(v0, v1, v2, r.z, r.w);
+
+        if (testOcclusion(pos, sampled)) {
+            return InvalidPdf;
+        }
+        glm::vec3 normal = Math::triangleNormal(v0, v1, v2);
+        glm::vec3 posToSampled = sampled - pos;
+
+#if SCENE_LIGHT_SINGLE_SIDED
+        if (glm::dot(normal, posToSampled) > 0.f) {
+            return InvalidPdf;
+        }
+#endif
+        float area = Math::triangleArea(v0, v1, v2);
+        radiance = devLightUnitRadiance[lightId];
+        wi = glm::normalize(posToSampled);
+        float power = Math::luminance(radiance) /*/ (area * TWO_PI)*/;
+        return Math::pdfAreaToSolidAngle(power * sumLightPowerInv, pos, sampled, normal);
+    }
 };
 
 /**

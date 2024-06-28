@@ -183,6 +183,7 @@ CMakeScripts
 Makefile
 cmake_install.cmake
 install_manifest.txt
+/CMakeSettings.json
 
 
 ### C++ ###
@@ -226,6 +227,9 @@ install_manifest.txt
 *.cubin
 *.fatbin
 
+# Nsight Compute
+*.ncu-rep
+*.ncu-occ
 
 ### VisualStudio ###
 ## Ignore Visual Studio temporary files, build results, and
@@ -560,3 +564,4 @@ xcuserdata
 *.xccheckout
 *.moved-aside
 *.xcuserstate
+imgui.ini
