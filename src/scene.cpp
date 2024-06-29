@@ -409,57 +409,23 @@ void DevScene::freeDevData() {
     Cuda::safeFree(devAliasTable);
 }
 
-/**
- * Given a ray direction, pick a MTBVH.
- * @see bvh.cpp and bvh.h for more details
- * 
- * @param dir Direction of the ray
- * @return An index in 0-5
- * 
- * |dir.x| dominates, then (dir.x > 0) ? 0 : 1
- * similar stories for dir.y and dir.z
- */
 //__device__ int DevScene::getMTBVHId(glm::vec3 dir)
 
 //__device__ glm::vec3 DevScene::getPrimitiveNormal(const int primId)
 
-/**
- * After intersection test, fetch info of intersected triangle.
- * 
- * @param intersec Output parameter to be updated
- */
 //__device__ void DevScene::getIntersecGeomInfo(int primId, const glm::vec2 bary, Intersection& intersec)
 
-/**
- * Grab the triangle from the vertices pool and perform ray-triangle test.
- * 
- * @param dist Output parameter to be updated (if a closer hit occurs)
- * @param bary Output parameter to be updated (if a closer hit occurs)
- */
 //__device__ bool DevScene::intersectPrimitive(int primId, const Ray& ray, float& dist, glm::vec2& bary)
 
 //__device__ bool DevScene::intersectPrimitive(int primId, const Ray& ray, float distRange)
 
-/** NOT USED YET */
 //__device__ bool DevScene::intersectPrimitiveDetailed(int primId, const Ray& ray, Intersection& intersec)
 
-/**
- * Given a ray, find the cloest intersection, if one exist, in the entire scene.
- * 
- * @param intersec Output parameter
- */
 //__device__ void DevScene::intersect(const Ray& ray, Intersection& intersec)
 
-/**
- * Shoot a ray from x to y and test occulsion.
- */
 //__device__ bool DevScene::testOcclusion(glm::vec3 x, glm::vec3 y)
 
-/**
- * DEBUG version intersection test.
- * 
- * intersec.primId will be written with #triangles hit
- */
 //__device__ void DevScene::visualizedIntersect(const Ray& ray, Intersection& intersec)
+
 //__device__ float DevScene::sampleDirectLight(glm::vec3 pos, glm::vec4 r, glm::vec3& radiance, glm::vec3& wi)
 #pragma endregion

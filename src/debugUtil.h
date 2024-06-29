@@ -11,19 +11,19 @@
 
 namespace Debug {
     __device__
-        static inline bool badVec(glm::vec3& v) {
+        static inline bool badVec(glm::vec3 v) {
         float len = glm::length(v);
         return len <= 1e-6f || len >= 1e6f;
     }
 
     __device__
-        static inline bool isNanInf(glm::vec3& r) {
+        static inline bool isNanInf(glm::vec3 r) {
         return isnan(r.x) || isnan(r.y) || isnan(r.z) ||
             isinf(r.x) || isinf(r.y) || isinf(r.z);
     }
 
     __device__
-        static inline bool notUnitLength(glm::vec3& v) {
+        static inline bool notUnitLength(glm::vec3 v) {
         float len = glm::length(v);
         return abs(len - 1.f) > 1e-6f;
     }

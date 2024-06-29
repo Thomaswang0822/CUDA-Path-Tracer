@@ -100,12 +100,10 @@ __global__ void computeIntersections(
 	DevScene* scene,
 	Intersection* intersections
 ) {
-	// Turned to BVH traversal
-
 	int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 
 	if (path_index < num_paths) {
-		PathSegment pathSegment = pathSegments[path_index];
+		PathSegment& pathSegment = pathSegments[path_index];
 #if BVH_DEBUG_VISUALIZATION
 		scene->visualizedIntersect(pathSegment.ray, intersections[path_index]);
 #else
@@ -133,7 +131,7 @@ __global__ void computeIntersections(
 		}
 		intersections[path_index] = intersec;
 #endif // BVH_DEBUG_VISUALIZATION
-	}
+	}  // end if (path_index < num_paths)
 }
 
 __global__ void shadeSegment(
@@ -153,15 +151,7 @@ __global__ void shadeSegment(
 	// Deal with miss
 	Intersection& intersec = intersections[idx];
 	if (intersec.primId == NullPrimitive) {
-		if (Math::luminance(segments[idx].radiance) < LOW_VALUE) {
-			// insignificant
-			segments[idx].pixelIndex = PixelIdxForTerminated;
-		}
-		else {
-			// still need to eval
-			segments[idx].remainingBounces = 0;
-		}
-		//segments[idx].radiance = DEBUG_BLUE;
+		segments[idx].remainingBounces = 0;
 		return;
 	}
 
@@ -188,29 +178,30 @@ __global__ void shadeSegment(
 	/// If hit a light source
 	if (material.type == Material::Type::Light) {
 		glm::vec3 radiance = material.baseColor * material.emittance;
-		if (depth == 0) {
-			accRadiance += radiance;
-		}
-		else if (segment.isDeltaSample) {
+		if (depth == 0 || segment.isDeltaSample) {
+			// If this is the first bounce or if we just had a specular bounce
 			accRadiance += radiance * segment.throughput;
 		}
 		else {
+			/// previous shading point (ray.origin) bounced off to a light
+			/// so we do MIS
 			float lightPdf = Math::pdfAreaToSolidAngle(Math::luminance(radiance) * scene->sumLightPowerInv,
 				intersec.prevPos, intersec.position, intersec.normal);
 			float BSDFPdf = segment.BSDFpdf;
 			accRadiance += radiance * segment.throughput * Math::powerHeuristic(BSDFPdf, lightPdf);
 		}
+		// stop bouncing in both cases
 		segment.remainingBounces = 0;
 	}
 	/// Do MIS
 	else {
 		bool deltaBSDF = (material.type == Material::Type::Dielectric);
-		if (material.type != Material::Type::Dielectric && glm::dot(intersec.normal, intersec.wo) < 0.f) {
+		if (!deltaBSDF && glm::dot(intersec.normal, intersec.wo) < 0.f) {
 			// other than Dielectric (glass), we don't allow refraction.
 			intersec.normal = -intersec.normal;
 		}
 
-		// Light Sampling
+		// Light Sampling: accumulate radiance right away
 		if (!deltaBSDF) {
 			glm::vec3 radiance;
 			glm::vec3 wi;
@@ -226,7 +217,7 @@ __global__ void shadeSegment(
 			}
 		}
 
-		// BSDF sampling
+		// BSDF sampling: postpone to next bounce
 		BSDFSample sample;
 		material.sample(intersec.normal, intersec.wo, sampler.sample3D(), sample);
 
@@ -254,7 +245,7 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
 
 	if (index < nPaths)
 	{
-		PathSegment iterationPath = iterationPaths[index];
+		const PathSegment& iterationPath = iterationPaths[index];
 		//image[iterationPath.pixelIndex] += iterationPath.throughput;
 		if (iterationPath.pixelIndex >= 0 && iterationPath.remainingBounces <= 0) {
 			if (Debug::isNanInf(iterationPath.radiance)) {

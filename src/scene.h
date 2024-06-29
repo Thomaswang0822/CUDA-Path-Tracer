@@ -46,7 +46,16 @@ struct DevScene {
     void createDevData(const Scene& scene);
     void freeDevData();
 
-
+    /**
+     * Given a ray direction, pick a MTBVH.
+     * @see bvh.cpp and bvh.h for more details
+     *
+     * @param dir Direction of the ray
+     * @return An index in 0-5
+     *
+     * |dir.x| dominates, then (dir.x > 0) ? 0 : 1
+     * similar stories for dir.y and dir.z
+     */
     __device__ int getMTBVHId(glm::vec3 dir) {
         glm::vec3 absDir = glm::abs(dir);
         if (absDir.x > absDir.y) {
@@ -67,6 +76,11 @@ struct DevScene {
         }
     }
 
+    /**
+     * After intersection test, fetch info of intersected triangle.
+     *
+     * @param intersec Output parameter to be updated
+     */
     __device__ glm::vec3 getPrimitiveNormal(const int primId) {
         glm::vec3 v0 = devVertices[primId * 3 + 0];
         glm::vec3 v1 = devVertices[primId * 3 + 1];
@@ -74,6 +88,12 @@ struct DevScene {
         return glm::normalize(glm::cross(v1 - v0, v2 - v0));
     }
 
+    /**
+     * Grab the triangle from the vertices pool and perform ray-triangle test.
+     *
+     * @param dist Output parameter to be updated (if a closer hit occurs)
+     * @param bary Output parameter to be updated (if a closer hit occurs)
+     */
     __device__ void getIntersecGeomInfo(int primId, const glm::vec2 bary, Intersection& intersec) {
         glm::vec3 va = devVertices[primId * 3 + 0];
         glm::vec3 vb = devVertices[primId * 3 + 1];
@@ -117,6 +137,7 @@ struct DevScene {
         return (hit && dist < distRange);
     }
 
+    /** NOT USED YET */
     __device__ bool intersectPrimitiveDetailed(int primId, const Ray& ray, Intersection& intersec) {
         glm::vec3 va = devVertices[primId * 3 + 0];
         glm::vec3 vb = devVertices[primId * 3 + 1];
@@ -169,6 +190,11 @@ struct DevScene {
         }
     }
 
+    /**
+     * Given a ray, find the cloest intersection, if one exist, in the entire scene.
+     *
+     * @param intersec Output parameter
+     */
     __device__ void intersect(const Ray& ray, Intersection& intersec) {
         float closestDist = FLT_MAX;
         int closestPrimId = NullPrimitive;
@@ -215,6 +241,9 @@ struct DevScene {
         }
     }
 
+    /**
+     * Shoot a ray from x to y and test occulsion.
+     */
     __device__ bool testOcclusion(glm::vec3 x, glm::vec3 y) {
         glm::vec3 dir = glm::normalize(y - x);
         float dist = glm::length(y - x) - EPSILON * 2.f;   // BUG
@@ -242,6 +271,11 @@ struct DevScene {
         return hit;
     }
 
+    /**
+     * DEBUG version intersection test.
+     *
+     * intersec.primId will be written with #triangles hit
+     */
     __device__ void visualizedIntersect(const Ray& ray, Intersection& intersec) {
         float closestDist = FLT_MAX;
         int closestPrimId = NullPrimitive;
@@ -285,6 +319,16 @@ struct DevScene {
         intersec.primId = maxDepth;
     }
 
+    /**
+     * Randomly pick a light, test shadow ray.
+     * 
+     * @param pos: Current shading point
+     * @param r: 4 random numbers
+     * @param radiance: Output; randiance of sampled light
+     * @param wi: Output; unit direction from pos to sampled point on light
+     * 
+     * @return pdf
+     */
     __device__ float sampleDirectLight(glm::vec3 pos, glm::vec4 r, glm::vec3& radiance, glm::vec3& wi) {
         int bucketId = static_cast<int>(r.x * numLightPrims);
         int lightId = (r.y < devProbTable[bucketId]) ? bucketId : devAliasTable[bucketId];

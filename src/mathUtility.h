@@ -147,10 +147,10 @@ namespace Math {
     /**
      * Given the pdf for light sampling (in area measure), turn it to solid angle measure.
      * 
-     * @param pdf
-     * @param x
-     * @param y
-     * @param ny
+     * @param pdf: In area measure
+     * @param x: intersection point
+     * @param y: position on light
+     * @param ny: normal of y
      */
     __device__ inline float pdfAreaToSolidAngle(float pdf, glm::vec3 x, glm::vec3 y, glm::vec3 ny) {
         glm::vec3 yx = x - y;
