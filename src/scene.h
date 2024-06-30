@@ -248,7 +248,6 @@ struct DevScene {
         glm::vec3 dir = glm::normalize(y - x);
         float dist = glm::length(y - x) - EPSILON * 2.f;   // BUG
         Ray ray = Ray::makeOffsetRay(x, dir);
-        bool hit = false;
 
         MTBVHNode* nodes = devBVHNodes[getMTBVHId(-ray.direction)];
         int node = 0;
@@ -260,7 +259,9 @@ struct DevScene {
             if (boundHit && boundDist < dist) {
                 int primId = nodes[node].primitiveId;
                 if (primId != NullPrimitive) {
-                    hit |= intersectPrimitive(primId, ray, dist);
+                    if (intersectPrimitive(primId, ray, dist)) {
+                        return true;
+                    }
                 }
                 node++;
             }
@@ -268,7 +269,7 @@ struct DevScene {
                 node = nodes[node].nextNodeIfMiss;
             }
         }
-        return hit;
+        return false;
     }
 
     /**
