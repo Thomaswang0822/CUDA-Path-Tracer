@@ -11,7 +11,7 @@ static bool middleMousePressed = false;
 static double lastX;
 static double lastY;
 
-static bool camchanged = true;
+//static bool camchanged = true;  // moved to Settings
 static float dtheta = 0, dphi = 0;
 static glm::vec3 cammove;
 
@@ -96,10 +96,21 @@ void saveImage() {
 	for (int x = 0; x < width; x++) {
 		for (int y = 0; y < height; y++) {
 			int index = x + (y * width);
-			glm::vec3 colorRawAvg = renderState->image[index] / float(samples);
-			// Do ACES tone mapping and Gamma correction
-			glm::vec3 colorOut = Math::correctGamma(Math::mapACES(colorRawAvg));
-			img.setPixel(width - 1 - x, y, colorOut);
+			glm::vec3 color = renderState->image[index] / float(samples);
+			// Do ACES tone mapping based on option
+			switch (Settings::toneMapping)
+			{
+			case ToneMapping::ACES:
+				color = Math::mapACES(color);
+				break;
+			case ToneMapping::None:
+				break;
+			default:
+				break;
+			}
+			// and Gamma correction
+			color = Math::correctGamma(color);
+			img.setPixel(width - 1 - x, y, color);
 		}
 	}
 
@@ -114,10 +125,10 @@ void saveImage() {
 }
 
 void runCuda() {
-	if (camchanged) {
+	if (State::camChanged) {
 		iteration = 0;
 		renderState->camera.updateCamParam(zoom, phi, theta);
-		camchanged = false;
+		State::camChanged = false;
 	}
 
 	// Map OpenGL buffer object for writing from CUDA on a single GPU
@@ -149,6 +160,7 @@ void runCuda() {
 }
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+	Camera& cam = renderState->camera;
 	if (action == GLFW_PRESS) {
 		switch (key) {
 		case GLFW_KEY_ESCAPE:
@@ -158,14 +170,31 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 		case GLFW_KEY_S:
 			saveImage();
 			break;
-		case GLFW_KEY_SPACE:
-			camchanged = true;
+		case GLFW_KEY_T:
+			Settings::toneMapping = (Settings::toneMapping + 1) % 2;
+			break;
+		case GLFW_KEY_DOWN:
+			// duck
+			cam.position += glm::vec3(0.f, -1.f, 0.f);
+			//State::camChanged = true;
+			break;
+		case GLFW_KEY_UP:
+			cam.position += glm::vec3(0.f, 1.f, 0.f);
+			//State::camChanged = true;
+			break;
+		case GLFW_KEY_R:
 			renderState = &scene->state;
-			Camera& cam = renderState->camera;
 			cam.lookAt = ogLookAt;
+			State::camChanged = true;
 			break;
 		}
 	}
+}
+
+void mouseScrollCallback(GLFWwindow* window, double offsetX, double offsetY) {
+	zoom -= offsetY;
+	zoom = std::fmax(0.1f, zoom);
+	State::camChanged = true;
 }
 
 void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
@@ -182,22 +211,26 @@ void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
  * This function must have fixed signature: 2 doubles.
  */
 void mousePositionCallback(GLFWwindow* window, double xpos, double ypos) {
-	if (xpos == lastX || ypos == lastY) return; // otherwise, clicking back into window causes re-start
+	Camera& cam = renderState->camera;
+	if (xpos == lastX || ypos == lastY) {
+		return; // otherwise, clicking back into window causes re-start
+	}
+		
 	if (leftMousePressed) {
 		// compute new camera parameters
 		phi -= (xpos - lastX) / width;
 		theta -= (ypos - lastY) / height;
 		theta = std::fmax(0.001f, std::fmin(theta, PI));
-		camchanged = true;
+		State::camChanged = true;
 	}
 	else if (rightMousePressed) {
-		zoom += (ypos - lastY) / height;
-		zoom = std::fmax(0.1f, zoom);
-		camchanged = true;
+		float dy = (ypos - lastY) / height;
+		cam.position.y += dy;
+		cam.lookAt.y += dy;
+		State::camChanged = true;
 	}
 	else if (middleMousePressed) {
 		renderState = &scene->state;
-		Camera& cam = renderState->camera;
 		glm::vec3 forward = cam.view;
 		forward.y = 0.0f;
 		forward = glm::normalize(forward);
@@ -207,7 +240,7 @@ void mousePositionCallback(GLFWwindow* window, double xpos, double ypos) {
 
 		cam.lookAt -= (float)(xpos - lastX) * right * 0.01f;
 		cam.lookAt += (float)(ypos - lastY) * forward * 0.01f;
-		camchanged = true;
+		State::camChanged = true;
 	}
 	lastX = xpos;
 	lastY = ypos;

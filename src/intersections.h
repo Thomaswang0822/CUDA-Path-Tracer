@@ -27,6 +27,7 @@ __host__ __device__ static glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v) {
  * @param outside            Output param for whether the ray came from outside.
  * @return                   Ray parameter `t` value. -1 if no intersection.
  */
+/*
 __host__ __device__ static float boxIntersectionTest(Geom box, Ray r,
         glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside
 ) {
@@ -40,7 +41,8 @@ __host__ __device__ static float boxIntersectionTest(Geom box, Ray r,
     glm::vec3 tmax_n;
     for (int xyz = 0; xyz < 3; ++xyz) {
         float qdxyz = q.direction[xyz];
-        /*if (glm::abs(qdxyz) > 0.00001f)*/ {
+        //if (glm::abs(qdxyz) > 0.00001f)
+        {
             float t1 = (-0.5f - q.origin[xyz]) / qdxyz;
             float t2 = (+0.5f - q.origin[xyz]) / qdxyz;
             float ta = glm::min(t1, t2);
@@ -70,7 +72,7 @@ __host__ __device__ static float boxIntersectionTest(Geom box, Ray r,
         return glm::length(r.origin - intersectionPoint);
     }
     return -1;
-}
+} */
 
 // CHECKITOUT
 /**
@@ -82,6 +84,7 @@ __host__ __device__ static float boxIntersectionTest(Geom box, Ray r,
  * @param outside            Output param for whether the ray came from outside.
  * @return                   Ray parameter `t` value. -1 if no intersection.
  */
+/*
 __host__ __device__ static float sphereIntersectionTest(Geom sphere, Ray r,
         glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside) {
     float radius = .5;
@@ -124,7 +127,7 @@ __host__ __device__ static float sphereIntersectionTest(Geom sphere, Ray r,
     }
 
     return glm::length(r.origin - intersectionPoint);
-}
+} */
 
 //// A caller that switches on geometry type and call actual intersection test.
 //__host__ __device__ static float intersectionTest(Geom geometry, Ray r,

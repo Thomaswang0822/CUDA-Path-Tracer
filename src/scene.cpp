@@ -218,7 +218,7 @@ void Scene::loadCamera() {
             state.iterations = stoi(tokens[1]);
         }
         else if (tokens[0] == "Depth") {
-            state.traceDepth = stoi(tokens[1]);
+            Settings::traceDepth = stoi(tokens[1]);
         }
         else if (tokens[0] == "File") {
             state.imageName = tokens[1];

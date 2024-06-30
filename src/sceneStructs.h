@@ -6,42 +6,25 @@
 
 #define BACKGROUND_COLOR (glm::vec3(0.0f))
 
-enum class GeomType {
-    SPHERE,
-    CUBE,
-};
-
-struct Geom {
-    GeomType type;
-    int materialid;
-    glm::vec3 translation;
-    glm::vec3 rotation;
-    glm::vec3 scale;
-    glm::mat4 transform;
-    glm::mat4 inverseTransform;
-    glm::mat4 invTranspose;
-};
-
-struct Triangle {
-    glm::vec3 vertex[3];
-    glm::vec3 normal[3];
-    glm::vec2 texcoord[3];
-};
 
 struct RenderState {
     Camera camera;
     unsigned int iterations;
-    int traceDepth;
+    //int traceDepth;
     std::vector<glm::vec3> image;
     std::string imageName;
+};
+
+struct PrevBSDFSampleInfo {
+    float BSDFPdf;
+    bool deltaSample;
 };
 
 struct PathSegment {
     Ray ray;
     glm::vec3 throughput;
     glm::vec3 radiance;
-    float BSDFpdf;
-    bool isDeltaSample;
+    PrevBSDFSampleInfo prev;
     int pixelIndex;
     int remainingBounces;
 };
@@ -61,6 +44,7 @@ struct Intersection {
         glm::vec3 prevPos;  // for light sampling
     };
     int materialId;
+    PrevBSDFSampleInfo prev;
 
     __device__ Intersection() {}
 
@@ -75,6 +59,7 @@ struct Intersection {
         normal = rhs.normal;
         uv = rhs.uv;
         wo = rhs.wo;
+        prev = rhs.prev;
     }
 };
 

@@ -1,19 +1,19 @@
 #pragma once
 
-#include <vector>
-#include <map>
-#include <fstream>
-#include "materials.h"
-#include "sceneStructs.h"
 #include "bvh.h"
-#include "image.h"
-#include "texture.h"
 #include "camera.h"
+#include "image.h"
+#include "intersections.h"
+#include "materials.h"
 #include "mesh.h"
 #include "sampler.h"
-#include "intersections.h"
+#include "sceneStructs.h"
+#include "settings.h"
+#include "texture.h"
+#include <fstream>
+#include <map>
+#include <vector>
 
-#define SCENE_LIGHT_SINGLE_SIDED true
 
 class Scene;  // declare for DevScene
 
@@ -232,13 +232,9 @@ struct DevScene {
         }
         if (closestPrimId != NullPrimitive) {
             getIntersecGeomInfo(closestPrimId, closestBary, intersec);
-            intersec.primId = closestPrimId;
-            //intersec.inDir = -ray.direction;
             intersec.materialId = devMaterialIds[closestPrimId];
         }
-        else {
-            intersec.primId = NullPrimitive;
-        }
+        intersec.primId = closestPrimId;
     }
 
     /**

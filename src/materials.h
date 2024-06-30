@@ -131,7 +131,9 @@ struct Material {
     float ior;
     float emittance;
 
-    int textureId;
+    //int textureId;
+    int baseColorMapId;
+    int normalMapId;
 
     /// ALL member functions of Material should be made const,
     /// i.e. not changing any member variables.

@@ -71,19 +71,12 @@ __global__ void generateRayFromCamera(const Camera cam, int iter, int traceDepth
 	if (x < cam.resolution.x && y < cam.resolution.y) {
 		int index = x + (y * cam.resolution.x);
 		PathSegment& segment = pathSegments[index];
-
-		//segment.ray.origin = cam.position;
-		segment.throughput = glm::vec3(1.0f);
-		segment.radiance = glm::vec3(0.f);
-
 		// antialiasing by jittering the ray
-		/*segment.ray.direction = glm::normalize(cam.view
-			- cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f)
-			- cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f)
-		);*/
 		Sampler sampler(iter, index, 0);
 		cam.generateCameraRay(segment.ray, x, y, sampler.sample2D());
-
+		// segment.ray modified in-place; set up other fields
+		segment.throughput = glm::vec3(1.0f);
+		segment.radiance = glm::vec3(0.f);
 		segment.pixelIndex = index;
 		segment.remainingBounces = traceDepth;
 	}
@@ -134,6 +127,35 @@ __global__ void computeIntersections(
 	}  // end if (path_index < num_paths)
 }
 
+__global__ void shadeBVH(
+	int iter, int width, int height, 
+	const Camera cam, 
+	DevScene* scene,  glm::vec3* image
+) {
+	int x = blockDim.x * blockIdx.x + threadIdx.x;
+	int y = blockDim.y * blockIdx.y + threadIdx.y;
+	if (x >= width || y >= height) {
+		return;
+	}
+	int index = y * width + x;
+
+	Sampler sampler(iter, index, 0);
+	Ray ray;
+	cam.generateCameraRay(ray, x, y, sampler.sample2D());
+
+	Intersection intersec;
+	scene->visualizedIntersect(ray, intersec);
+
+	float logDepth = 0.f;
+	int size = scene->BVHSize;
+	while (size) {
+		logDepth += 1.f;
+		size >>= 1;
+	}
+	image[index] += glm::vec3(float(intersec.primId) / logDepth * .1f);
+}
+
+
 __global__ void shadeSegment(
 	int iter,
 	int depth,
@@ -177,8 +199,9 @@ __global__ void shadeSegment(
 
 	/// If hit a light source
 	if (material.type == Material::Type::Light) {
+		PrevBSDFSampleInfo prev = intersec.prev;
 		glm::vec3 radiance = material.baseColor * material.emittance;
-		if (depth == 0 || segment.isDeltaSample) {
+		if (depth == 0 || prev.deltaSample) {
 			// If this is the first bounce or if we just had a specular bounce
 			accRadiance += radiance * segment.throughput;
 		}
@@ -187,7 +210,7 @@ __global__ void shadeSegment(
 			/// so we do MIS
 			float lightPdf = Math::pdfAreaToSolidAngle(Math::luminance(radiance) * scene->sumLightPowerInv,
 				intersec.prevPos, intersec.position, intersec.normal);
-			float BSDFPdf = segment.BSDFpdf;
+			float BSDFPdf = prev.BSDFPdf;
 			accRadiance += radiance * segment.throughput * Math::powerHeuristic(BSDFPdf, lightPdf);
 		}
 		// stop bouncing in both cases
@@ -230,8 +253,7 @@ __global__ void shadeSegment(
 			segment.throughput *= sample.bsdf / sample.pdf *
 				(deltaSample ? 1.f : Math::absDot(intersec.normal, sample.dir));
 			segment.ray = Ray::makeOffsetRay(intersec.position, sample.dir);
-			segment.BSDFpdf = sample.pdf;
-			segment.isDeltaSample = deltaSample;
+			segment.prev = { sample.pdf, deltaSample };
 			segment.remainingBounces--;
 		}
 	}
@@ -258,17 +280,33 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
 }
 
 //Kernel that writes the image to the OpenGL PBO directly.
-__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image) {
+__global__ void sendImageToPBO(
+	uchar4* pbo, 
+	glm::ivec2 resolution, 
+	int iter, 
+	glm::vec3* image,
+	int tMap
+) {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
 
 	if (x < resolution.x && y < resolution.y) {
 		int index = x + (y * resolution.x);
-		glm::vec3 colorRawAvg = image[index] / float(iter);
-
-		// Do ACES tone mapping and Gamma correction
-		glm::vec3 colorOut = Math::correctGamma(Math::mapACES(colorRawAvg));
-		glm::vec3 intColor = glm::clamp(glm::ivec3(colorOut * 255.f), glm::ivec3(0.f), glm::ivec3(255.f));
+		glm::vec3 color = image[index] / float(iter);
+		// Do ACES tone mapping based on option
+		switch (tMap)
+		{
+		case ToneMapping::ACES:
+			color = Math::mapACES(color);
+			break;
+		case ToneMapping::None:
+			break;
+		default:
+			break;
+		}
+		// and Gamma correction
+		color = Math::correctGamma(color);
+		glm::vec3 intColor = glm::clamp(glm::ivec3(color * 255.f), glm::ivec3(0.f), glm::ivec3(255.f));
 
 		// Each thread writes one pixel location in the texture (textel)
 		pbo[index].w = 0;
@@ -283,8 +321,6 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
  * of memory management
  */
 void pathtrace(uchar4* pbo, int frame, int iter) {
-
-	const int traceDepth = hst_scene->state.traceDepth;
 	const Camera& cam = hst_scene->state.camera;
 	const int pixelcount = cam.resolution.x * cam.resolution.y;
 
@@ -298,7 +334,7 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 	// 1D block for path tracing
 	const int blockSize1d = 128;
 
-	generateRayFromCamera <<<blocksPerGrid2d, blockSize2d>>> (cam, iter, traceDepth, paths_alive);
+	generateRayFromCamera <<<blocksPerGrid2d, blockSize2d>>> (cam, iter, Settings::traceDepth, paths_alive);
 	checkCUDAError("generateRayFromCamera");
 	cudaDeviceSynchronize();
 
@@ -314,79 +350,95 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 	// --- PathSegment Tracing Stage ---
 	// Shoot ray into scene, bounce between objects, push shading chunks
 
-	bool iterationComplete = false;
-	while (!iterationComplete) {
+	if (Settings::tracer == Tracer::Streamed) {
+		bool iterationComplete = false;
+		while (!iterationComplete) {
 
-		// clean shading chunks
-		cudaMemset(dev_intersections, 0, pixelcount * sizeof(Intersection));
+			// clean shading chunks
+			cudaMemset(dev_intersections, 0, pixelcount * sizeof(Intersection));
 
-		// tracing
-		dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
-		computeIntersections <<<numblocksPathSegmentTracing, blockSize1d>>> (
-			depth,
-			num_paths,
-			paths_alive,  // PathSegment*
-			hst_scene->devScene,
-			dev_intersections
-		);
-		checkCUDAError("computeIntersections");
-		cudaDeviceSynchronize();
-		//depth++;
+			// tracing
+			dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
+			computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
+				depth,
+				num_paths,
+				paths_alive,  // PathSegment*
+				hst_scene->devScene,
+				dev_intersections
+				);
+			checkCUDAError("computeIntersections");
+			cudaDeviceSynchronize();
+			//depth++;
 
-		// --- Shading Stage ---
-		// Shade path segments based on intersections and generate new rays by
-		// evaluating the BSDF.
-		// TODO:
-		// Start off with just a big kernel that handles all the different
-		// materials you have in the scenefile.
+			// --- Shading Stage ---
+			// Shade path segments based on intersections and generate new rays by
+			// evaluating the BSDF.
+			// TODO:
+			// Start off with just a big kernel that handles all the different
+			// materials you have in the scenefile.
 
-		//shadeFakeMaterial <<<numblocksPathSegmentTracing, blockSize1d>>> (iter, num_paths, dev_intersections, paths_alive, dev_materials);
-		shadeSegment << <numblocksPathSegmentTracing, blockSize1d >> > (
-			iter, 
-			depth,
-			num_paths, 
-			dev_intersections, 
-			paths_alive, 
-			hst_scene->devScene
-		);
-		checkCUDAError("shadeSegment");
-		cudaDeviceSynchronize();
+			//shadeFakeMaterial <<<numblocksPathSegmentTracing, blockSize1d>>> (iter, num_paths, dev_intersections, paths_alive, dev_materials);
+			shadeSegment << <numblocksPathSegmentTracing, blockSize1d >> > (
+				iter,
+				depth,
+				num_paths,
+				dev_intersections,
+				paths_alive,
+				hst_scene->devScene
+				);
+			checkCUDAError("shadeSegment");
+			cudaDeviceSynchronize();
 
-		/**
-		 * @brief Compact paths that are terminated but carry contribution into a separate buffer.
-		 * It copies to next_thr_paths_done and advance it to next clean memory address, but thr_paths_alive isn't shortened.
-		 * 
-		 * @see https://nvidia.github.io/cccl/thrust/api/function_group__stream__compaction_1gaeec02acfde68e411ca7d09063241f4d7.html#thrust-remove-copy-if.
-		 */
-		next_thr_paths_done = thrust::remove_copy_if(thr_paths_alive, thr_paths_alive + num_paths, next_thr_paths_done, CompactTerminatedPaths());
-		// Remove paths that yield no contribution
-		/**
-		 * @brief Remove paths that yield no contribution.
-		 * 
-		 * @see https://nvidia.github.io/cccl/thrust/api/function_group__stream__compaction_1gaf01d45b30fecba794afae065d625f94f.html#thrust-remove-if
-		 */
-		auto thr_paths_alive_end = thrust::remove_if(thr_paths_alive, thr_paths_alive + num_paths, RemoveInvalidPaths());
-		num_paths = static_cast<int>(thr_paths_alive_end - thr_paths_alive);
-		//std::cout << "Remaining paths: " << num_paths << "\n";
+			/**
+			 * @brief Compact paths that are terminated but carry contribution into a separate buffer.
+			 * It copies to next_thr_paths_done and advance it to next clean memory address, but thr_paths_alive isn't shortened.
+			 *
+			 * @see https://nvidia.github.io/cccl/thrust/api/function_group__stream__compaction_1gaeec02acfde68e411ca7d09063241f4d7.html#thrust-remove-copy-if.
+			 */
+			next_thr_paths_done = thrust::remove_copy_if(thr_paths_alive, thr_paths_alive + num_paths, next_thr_paths_done, CompactTerminatedPaths());
+			// Remove paths that yield no contribution
+			/**
+			 * @brief Remove paths that yield no contribution.
+			 *
+			 * @see https://nvidia.github.io/cccl/thrust/api/function_group__stream__compaction_1gaf01d45b30fecba794afae065d625f94f.html#thrust-remove-if
+			 */
+			auto thr_paths_alive_end = thrust::remove_if(thr_paths_alive, thr_paths_alive + num_paths, RemoveInvalidPaths());
+			num_paths = static_cast<int>(thr_paths_alive_end - thr_paths_alive);
+			//std::cout << "Remaining paths: " << num_paths << "\n";
 
-		iterationComplete = bool(num_paths == 0);
-		depth++;
+			iterationComplete = bool(num_paths == 0);
+			depth++;
 
-		if (guiData != nullptr)
-		{
-			guiData->TracedDepth = depth;
+			if (guiData != nullptr)
+			{
+				guiData->TracedDepth = depth;
+			}
+
+			// Assemble this iteration and apply it to the image
+			dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
+			int numEffectivePaths = static_cast<int>(next_thr_paths_done.get() - paths_done);
+			finalGather << <numBlocksPixels, blockSize1d >> > (numEffectivePaths, dev_image, paths_done);
+		}
+	}
+	else {  // Visualize BVH only
+		const int BlockSizeSinglePTX = 8;
+		const int BlockSizeSinglePTY = 8;
+		int blockNumSinglePTX = (cam.resolution.x + BlockSizeSinglePTX - 1) / BlockSizeSinglePTX;
+		int blockNumSinglePTY = (cam.resolution.y + BlockSizeSinglePTY - 1) / BlockSizeSinglePTY;
+
+		dim3 singlePTBlockNum(blockNumSinglePTX, blockNumSinglePTY);
+		dim3 singlePTBlockSize(BlockSizeSinglePTX, BlockSizeSinglePTY);
+
+		shadeBVH << <singlePTBlockNum, singlePTBlockSize >> > (
+			iter, cam.resolution.x, cam.resolution.y, cam, hst_scene->devScene, dev_image);
+		
+		if (guiData != nullptr) {
+			guiData->TracedDepth = Settings::traceDepth;
 		}
 	}
 
-	// Assemble this iteration and apply it to the image
-	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-	int numEffectivePaths = static_cast<int>(next_thr_paths_done.get() - paths_done);
-	finalGather <<<numBlocksPixels, blockSize1d >>> (numEffectivePaths, dev_image, paths_done);
-
-	///////////////////////////////////////////////////////////////////////////
-
 	// Send results to OpenGL buffer for rendering
-	sendImageToPBO <<<blocksPerGrid2d, blockSize2d>>> (pbo, cam.resolution, iter, dev_image);
+	sendImageToPBO <<<blocksPerGrid2d, blockSize2d>>> (pbo, cam.resolution, iter, dev_image, Settings::toneMapping);
 
 	// Retrieve image from GPU
 	Cuda::memcpyDevToHost(hst_scene->state.image.data(), dev_image,
