@@ -5,6 +5,7 @@
 #include "ImGui/imgui.h"
 #include "ImGui/imgui_impl_glfw.h"
 #include "ImGui/imgui_impl_opengl3.h"
+
 GLuint positionLocation = 0;
 GLuint texcoordsLocation = 1;
 GLuint pbo;
@@ -109,7 +110,9 @@ void cleanupCuda() {
 }
 
 void initCuda() {
-	cudaGLSetGLDevice(0);
+	/// DEPRECATED starting CUDA 5.0
+	/*cudaGLSetGLDevice(0);
+	checkCUDAError("cudaGLSetDevice");*/
 
 	// Clean up on program exit
 	atexit(cleanupCuda);
@@ -165,9 +168,15 @@ bool init() {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	io = &ImGui::GetIO(); (void)io;
-	ImGui::StyleColorsLight();
+	ImGui::StyleColorsClassic();
 	ImGui_ImplGlfw_InitForOpenGL(window, true);
-	ImGui_ImplOpenGL3_Init("#version 120");
+	ImGui_ImplOpenGL3_Init("#version 450");
+
+	auto& guiStyle = ImGui::GetStyle();
+	guiStyle.FrameRounding = 1.0f;
+	guiStyle.FramePadding.y = 2.0f;
+	guiStyle.ItemSpacing.y = 6.0f;
+	guiStyle.GrabRounding = 1.0f;
 
 	// Initialize other stuff
 	initVAO();
@@ -203,6 +212,7 @@ void RenderImGui()
 	static float f = 0.0f;
 	static int counter = 0;
 
+#pragma region analytics
 	ImGui::Begin("Path Tracer Analytics");                  // Create a window called "Hello, world!" and append into it.
 	
 	// LOOK: Un-Comment to check the output window and usage
@@ -220,6 +230,24 @@ void RenderImGui()
 	ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
 	ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 	ImGui::End();
+#pragma endregion
+
+#pragma region runtime settings
+	ImGui::Begin("Options");
+	/// ImGui::Combo(const char* label, int* current_item, const char* const items[], int items_count, int height_in_items)
+	const char* Tracers[] = { "Streamed", "BVH Visualize" };
+	if (ImGui::Combo("Tracer", &Settings::tracer, Tracers, IM_ARRAYSIZE(Tracers))) {
+		State::camChanged = true;
+	}
+	if (ImGui::InputInt("Max Depth", &Settings::traceDepth, 1, 1)) {
+		State::camChanged = true;
+	}
+	ImGui::Separator();
+	ImGui::Text("Post Processing");
+	const char* ToneMappingMethods[] = { "None", "ACES" };
+	ImGui::Combo("Tone Mapping", &Settings::toneMapping, ToneMappingMethods, IM_ARRAYSIZE(ToneMappingMethods));
+	ImGui::End();
+#pragma endregion
 
 
 	ImGui::Render();
@@ -239,7 +267,7 @@ void mainLoop() {
 
 		runCuda();
 
-		string title = "CIS565 Path Tracer | " + utilityCore::convertIntToString(iteration) + " Iterations";
+		string title = "CUDA Path Tracer | " + Core::convertIntToString(iteration) + " Iterations";
 		glfwSetWindowTitle(window, title.c_str());
 		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
 		glBindTexture(GL_TEXTURE_2D, displayImage);

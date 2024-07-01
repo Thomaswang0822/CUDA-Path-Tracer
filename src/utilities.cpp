@@ -4,14 +4,10 @@
 //  File: utilities.cpp
 //  A collection/kitchen sink of generally useful functions
 
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/matrix_inverse.hpp>
-#include <iostream>
-#include <cstdio>
-
 #include "utilities.h"
+#include <glm/gtx/transform.hpp>
 
-float utilityCore::clamp(float f, float min, float max) {
+float Core::clamp(float f, float min, float max) {
     if (f < min) {
         return min;
     } else if (f > max) {
@@ -21,7 +17,7 @@ float utilityCore::clamp(float f, float min, float max) {
     }
 }
 
-bool utilityCore::replaceString(std::string& str, const std::string& from, const std::string& to) {
+bool Core::replaceString(std::string& str, const std::string& from, const std::string& to) {
     size_t start_pos = str.find(from);
     if (start_pos == std::string::npos)
         return false;
@@ -29,13 +25,13 @@ bool utilityCore::replaceString(std::string& str, const std::string& from, const
     return true;
 }
 
-std::string utilityCore::convertIntToString(int number) {
+std::string Core::convertIntToString(int number) {
     std::stringstream ss;
     ss << number;
     return ss.str();
 }
 
-glm::vec3 utilityCore::clampRGB(glm::vec3 color) {
+glm::vec3 Core::clampRGB(glm::vec3 color) {
     if (color[0] < 0) {
         color[0] = 0;
     } else if (color[0] > 255) {
@@ -54,7 +50,7 @@ glm::vec3 utilityCore::clampRGB(glm::vec3 color) {
     return color;
 }
 
-bool utilityCore::epsilonCheck(float a, float b) {
+bool Core::epsilonCheck(float a, float b) {
     if (fabs(fabs(a) - fabs(b)) < EPSILON) {
         return true;
     } else {
@@ -62,7 +58,7 @@ bool utilityCore::epsilonCheck(float a, float b) {
     }
 }
 
-glm::mat4 utilityCore::buildTransformationMatrix(glm::vec3 translation, glm::vec3 rotation, glm::vec3 scale) {
+glm::mat4 Core::buildTransformationMatrix(glm::vec3 translation, glm::vec3 rotation, glm::vec3 scale) {
     glm::mat4 translationMat = glm::translate(glm::mat4(), translation);
     glm::mat4 rotationMat =   glm::rotate(glm::mat4(), rotation.x * (float) PI / 180, glm::vec3(1, 0, 0));
     rotationMat = rotationMat * glm::rotate(glm::mat4(), rotation.y * (float) PI / 180, glm::vec3(0, 1, 0));
@@ -71,7 +67,7 @@ glm::mat4 utilityCore::buildTransformationMatrix(glm::vec3 translation, glm::vec
     return translationMat * rotationMat * scaleMat;
 }
 
-std::vector<std::string> utilityCore::tokenizeString(std::string str) {
+std::vector<std::string> Core::tokenizeString(std::string str) {
     std::stringstream strstr(str);
     std::istream_iterator<std::string> it(strstr);
     std::istream_iterator<std::string> end;
@@ -79,7 +75,7 @@ std::vector<std::string> utilityCore::tokenizeString(std::string str) {
     return results;
 }
 
-std::istream& utilityCore::safeGetline(std::istream& is, std::string& t) {
+std::istream& Core::safeGetline(std::istream& is, std::string& t) {
     t.clear();
 
     // The characters in the stream are read one-by-one using a std::streambuf.
@@ -109,4 +105,10 @@ std::istream& utilityCore::safeGetline(std::istream& is, std::string& t) {
             t += (char)c;
         }
     }
+}
+
+static std::string Core::vec3ToString(const glm::vec3& vec) {
+    std::stringstream ss;
+    ss << "{ x = " << vec.x << ", y = " << vec.y << ", z = " << vec.z << " }";
+    return ss.str();
 }

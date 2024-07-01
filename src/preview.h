@@ -1,5 +1,9 @@
 #pragma once
 
+#include "utilities.h"
+#include <GL/gl.h>
+#include <string>
+
 extern GLuint pbo;
 
 std::string currentTimeString();

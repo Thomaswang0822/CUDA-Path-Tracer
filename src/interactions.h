@@ -1,6 +1,7 @@
 #pragma once
 
 #include "intersections.h"
+#include "materials.h"
 
 // CHECKITOUT
 /**
@@ -68,7 +69,7 @@ glm::vec3 calculateRandomDirectionInHemisphere(
  */
 __host__ __device__
 void scatterRay(
-        PathSegment & pathSegment,
+        PathSegment &pathSegment,
         glm::vec3 intersect,
         glm::vec3 normal,
         const Material &m,

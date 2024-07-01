@@ -1,6 +1,5 @@
 #pragma once
 
-#include <vector>
 #include "scene.h"
 
 void InitDataContainer(GuiDataContainer* guiData);
