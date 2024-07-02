@@ -201,7 +201,7 @@ __global__ void shadeReSTIR_DI(
 		*/
 		accRadiance += material.baseColor;
 		// stop bouncing in both cases
-	segment.remainingBounces = 0;
+		segment.remainingBounces = 0;
 	}
 	// ReSTIR DI
 	else {
@@ -210,9 +210,84 @@ __global__ void shadeReSTIR_DI(
 		// compute f(r.y) = brdf * G * Visibility * Le
 		accRadiance += scene->f_DI(intersec, r.y) * r.W
 			* segment.throughput;
+		
+		//glm::vec3 radiance;
+		//glm::vec3 wi;
+		//float lightPdf = scene->sampleDirectLight(intersec.position, sampler.sample4D(), radiance, wi);
+		//if (lightPdf > 0.f) {
+		//	//float BSDFPdf = material.pdf(intersec.normal, intersec.wo, wi);
+		//	accRadiance += segment.throughput *	radiance * material.baseColor * 
+		//		Math::nonnegativeDot(intersec.normal, wi) / lightPdf;
+		//}
+
 		segment.remainingBounces = 0;
 	}
 	segment.radiance += accRadiance;
+	return;
+}
+
+__global__ void shadeDI(
+	int iter,
+	int depth,
+	int numPaths,
+	Intersection* intersections,
+	PathSegment* segments,
+	DevScene* scene
+) {
+	int idx = blockDim.x * blockIdx.x + threadIdx.x;
+	// Should be unnecessary with stream compaction implemented
+	if (idx >= numPaths) {
+		return;
+	}
+
+	// Deal with miss
+	Intersection& intersec = intersections[idx];
+	if (intersec.primId == NullPrimitive) {
+		segments[idx].remainingBounces = 0;
+		return;
+	}
+
+	Sampler sampler(iter, idx, segments[idx].remainingBounces);
+	const Material& material = scene->devMaterials[intersec.materialId];
+	PathSegment& segment = segments[idx];
+	glm::vec3 accRadiance(0.f);
+
+	/// If hit a light source
+	if (material.type == Material::Type::Light) {
+		accRadiance += material.baseColor;
+	}
+	else {
+		bool deltaBSDF = (material.type == Material::Type::Dielectric);
+		if (!deltaBSDF && glm::dot(intersec.normal, intersec.wo) < 0.f) {
+			// other than Dielectric (glass), we don't allow refraction.
+			intersec.normal = -intersec.normal;
+		}
+
+		// Light Sampling: accumulate radiance right away
+		if (!deltaBSDF) {
+			glm::vec3 radiance;
+			glm::vec3 wi;
+			float lightPdf = scene->sampleDirectLight(intersec.position, sampler.sample4D(), radiance, wi);
+
+			if (lightPdf > 0.f) {
+				float BSDFPdf = material.pdf(intersec.normal, intersec.wo, wi);
+				/*accRadiance += segment.throughput *
+					material.BSDF(intersec.normal, intersec.wo, wi) *
+					radiance *
+					Math::nonnegativeDot(intersec.normal, wi) /
+					lightPdf * Math::powerHeuristic(lightPdf, BSDFPdf);*/
+
+				accRadiance += segment.throughput *
+					material.BSDF(intersec.normal, intersec.wo, wi) *
+					radiance *
+					Math::nonnegativeDot(intersec.normal, wi) /
+					lightPdf;
+				
+			}
+		}
+	}
+	segment.radiance += accRadiance;
+	segment.remainingBounces = 0;
 	return;
 }
 
@@ -279,11 +354,18 @@ __global__ void shadeSegment(
 
 			if (lightPdf > 0.f) {
 				float BSDFPdf = material.pdf(intersec.normal, intersec.wo, wi);
+				/*accRadiance += segment.throughput *
+					material.BSDF(intersec.normal, intersec.wo, wi) *
+					radiance *
+					Math::nonnegativeDot(intersec.normal, wi) /
+					lightPdf * Math::powerHeuristic(lightPdf, BSDFPdf);*/
+
 				accRadiance += segment.throughput *
 					material.BSDF(intersec.normal, intersec.wo, wi) *
 					radiance *
 					Math::nonnegativeDot(intersec.normal, wi) /
-					lightPdf * Math::powerHeuristic(lightPdf, BSDFPdf);
+					lightPdf;
+				segment.remainingBounces = 0;
 			}
 		}
 
@@ -436,14 +518,14 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 			switch (Settings::tracer)
 			{
 			case Tracer::Streamed:
-			shadeSegment << <numblocksPathSegmentTracing, blockSize1d >> > (
-				iter,
-				depth,
-				num_paths,
-				dev_intersections,
-				paths_alive,
-				hst_scene->devScene
-				);
+				shadeDI << <numblocksPathSegmentTracing, blockSize1d >> > (
+					iter,
+					depth,
+					num_paths,
+					dev_intersections,
+					paths_alive,
+					hst_scene->devScene
+					);
 			checkCUDAError("shadeSegment");
 				break;
 			case Tracer::ReSTIR_DI:

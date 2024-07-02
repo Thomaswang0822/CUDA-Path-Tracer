@@ -395,10 +395,11 @@ struct DevScene {
         }
 
         const Material& material = devMaterials[intersec.materialId];
-        glm::vec3 wo = glm::normalize(xi.position - intersec.position);
+        glm::vec3 wi = glm::normalize(xi.position - intersec.position);
 
-        glm::vec3 brdf = material.BSDF(intersec.normal, wo, intersec.inDir);
+        glm::vec3 brdf = material.BSDF(intersec.normal, intersec.wo, wi);
         float G = Math::geometryTerm(intersec.position, xi.position, xi.normal);
+        //float G = Math::nonnegativeDot(intersec.normal, wi);
         glm::vec3 Le = devLightUnitRadiance[xi.lightId];
         return brdf * G * Le;
     }
