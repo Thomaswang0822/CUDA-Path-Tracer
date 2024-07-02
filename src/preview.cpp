@@ -235,7 +235,7 @@ void RenderImGui()
 #pragma region runtime settings
 	ImGui::Begin("Options");
 	/// ImGui::Combo(const char* label, int* current_item, const char* const items[], int items_count, int height_in_items)
-	const char* Tracers[] = { "Streamed", "BVH Visualize" };
+	const char* Tracers[] = { "Streamed", "BVH Visualize", "ReSTIR_DI"};
 	if (ImGui::Combo("Tracer", &Settings::tracer, Tracers, IM_ARRAYSIZE(Tracers))) {
 		State::camChanged = true;
 	}

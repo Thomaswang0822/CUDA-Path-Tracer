@@ -97,9 +97,7 @@ __global__ void computeIntersections(
 
 	if (path_index < num_paths) {
 		PathSegment& pathSegment = pathSegments[path_index];
-#if BVH_DEBUG_VISUALIZATION
-		scene->visualizedIntersect(pathSegment.ray, intersections[path_index]);
-#else
+
 		Intersection intersec;
 		scene->intersect(pathSegment.ray, intersec);
 
@@ -124,7 +122,7 @@ __global__ void computeIntersections(
 			}
 		}
 		intersections[path_index] = intersec;
-#endif // BVH_DEBUG_VISUALIZATION
+
 	}  // end if (path_index < num_paths)
 }
 
@@ -157,7 +155,7 @@ __global__ void shadeBVH(
 }
 
 
-__global__ void shadeSegment(
+__global__ void shadeReSTIR_DI(
 	int iter,
 	int depth,
 	int numPaths,
@@ -178,18 +176,66 @@ __global__ void shadeSegment(
 		return;
 	}
 
-#if BVH_DEBUG_VISUALIZATION
-	float logDepth = 0.f;
-	int size = scene->BVHSize;
-	while (size) {
-		logDepth += 1.f;
-		size >>= 1;
+	Sampler sampler(iter, idx, segments[idx].remainingBounces);
+	const Material& material = scene->devMaterials[intersec.materialId];
+	PathSegment& segment = segments[idx];
+	glm::vec3 accRadiance(0.f);
+
+	/// If hit a light source
+	if (material.type == Material::Type::Light) {
+		/*
+		PrevBSDFSampleInfo prev = intersec.prev;
+		glm::vec3 radiance = material.baseColor * material.emittance;
+		if (depth == 0 || prev.deltaSample) {
+			// If this is the first bounce or if we just had a specular bounce
+			accRadiance += radiance * segment.throughput;
 	}
-	segment.radiance = glm::vec3(float(intersec.primId) / logDepth * .1f);
-	//segment.radiance = intersec.primId > 16 ? glm::vec3(1.f) : glm::vec3(0.f);
+		else {
+			/// previous shading point (ray.origin) bounced off to a light
+			/// so we do MIS
+			float lightPdf = Math::pdfAreaToSolidAngle(Math::luminance(radiance) * scene->sumLightPowerInv,
+				intersec.prevPos, intersec.position, intersec.normal);
+			float BSDFPdf = prev.BSDFPdf;
+			accRadiance += radiance * segment.throughput * Math::powerHeuristic(BSDFPdf, lightPdf);
+		}
+		*/
+		accRadiance += material.baseColor;
+		// stop bouncing in both cases
 	segment.remainingBounces = 0;
+	}
+	// ReSTIR DI
+	else {
+		// r.y is the single survived sample, a postion on a light.
+		ReSTIR::Reservoir r = scene->RIS(4, sampler, intersec);
+		// compute f(r.y) = brdf * G * Visibility * Le
+		accRadiance += scene->f_DI(intersec, r.y) * r.W
+			* segment.throughput;
+		segment.remainingBounces = 0;
+	}
+	segment.radiance += accRadiance;
 	return;
-#endif
+}
+
+__global__ void shadeSegment(
+	int iter,
+	int depth,
+	int numPaths,
+	Intersection* intersections,
+	PathSegment* segments,
+	DevScene* scene
+) {
+	int idx = blockDim.x * blockIdx.x + threadIdx.x;
+	// Should be unnecessary with stream compaction implemented
+	if (idx >= numPaths) {
+		return;
+	}
+
+	// Deal with miss
+	Intersection& intersec = intersections[idx];
+	if (intersec.primId == NullPrimitive) {
+		segments[idx].remainingBounces = 0;
+		return;
+	}
 
 	Sampler sampler(iter, idx, segments[idx].remainingBounces);
 	const Material& material = scene->devMaterials[intersec.materialId];
@@ -349,9 +395,25 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 	auto next_thr_paths_done = thr_paths_done;
 
 	// --- PathSegment Tracing Stage ---
-	// Shoot ray into scene, bounce between objects, push shading chunks
+	/** Debug modes */
+	if (Settings::tracer == Tracer::BVHVisualize) {
+		const int BlockSizeSinglePTX = 8;
+		const int BlockSizeSinglePTY = 8;
+		int blockNumSinglePTX = (cam.resolution.x + BlockSizeSinglePTX - 1) / BlockSizeSinglePTX;
+		int blockNumSinglePTY = (cam.resolution.y + BlockSizeSinglePTY - 1) / BlockSizeSinglePTY;
 
-	if (Settings::tracer == Tracer::Streamed) {
+		dim3 singlePTBlockNum(blockNumSinglePTX, blockNumSinglePTY);
+		dim3 singlePTBlockSize(BlockSizeSinglePTX, BlockSizeSinglePTY);
+
+		shadeBVH << <singlePTBlockNum, singlePTBlockSize >> > (
+			iter, cam.resolution.x, cam.resolution.y, cam, hst_scene->devScene, dev_image);
+
+		if (guiData != nullptr) {
+			guiData->TracedDepth = Settings::traceDepth;
+		}
+	}
+	/** Shading modes */
+	else {
 		bool iterationComplete = false;
 		while (!iterationComplete) {
 
@@ -371,14 +433,9 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 			cudaDeviceSynchronize();
 			//depth++;
 
-			// --- Shading Stage ---
-			// Shade path segments based on intersections and generate new rays by
-			// evaluating the BSDF.
-			// TODO:
-			// Start off with just a big kernel that handles all the different
-			// materials you have in the scenefile.
-
-			//shadeFakeMaterial <<<numblocksPathSegmentTracing, blockSize1d>>> (iter, num_paths, dev_intersections, paths_alive, dev_materials);
+			switch (Settings::tracer)
+			{
+			case Tracer::Streamed:
 			shadeSegment << <numblocksPathSegmentTracing, blockSize1d >> > (
 				iter,
 				depth,
@@ -388,6 +445,22 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 				hst_scene->devScene
 				);
 			checkCUDAError("shadeSegment");
+				break;
+			case Tracer::ReSTIR_DI:
+				shadeReSTIR_DI << <numblocksPathSegmentTracing, blockSize1d >> > (
+					iter,
+					depth,
+					num_paths,
+					dev_intersections,
+					paths_alive,
+					hst_scene->devScene
+					);
+				checkCUDAError("shadeReSTIR_DI");
+				break;
+			default:
+				exit(EXIT_FAILURE);  // other debug modes shouldn't be here
+				break;
+			}
 			cudaDeviceSynchronize();
 
 			/**
@@ -419,22 +492,6 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 		dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
 		int numEffectivePaths = static_cast<int>(next_thr_paths_done.get() - paths_done);
 		finalGather << <numBlocksPixels, blockSize1d >> > (numEffectivePaths, dev_image, paths_done);
-	}
-	else {  // Visualize BVH only
-		const int BlockSizeSinglePTX = 8;
-		const int BlockSizeSinglePTY = 8;
-		int blockNumSinglePTX = (cam.resolution.x + BlockSizeSinglePTX - 1) / BlockSizeSinglePTX;
-		int blockNumSinglePTY = (cam.resolution.y + BlockSizeSinglePTY - 1) / BlockSizeSinglePTY;
-
-		dim3 singlePTBlockNum(blockNumSinglePTX, blockNumSinglePTY);
-		dim3 singlePTBlockSize(BlockSizeSinglePTX, BlockSizeSinglePTY);
-
-		shadeBVH << <singlePTBlockNum, singlePTBlockSize >> > (
-			iter, cam.resolution.x, cam.resolution.y, cam, hst_scene->devScene, dev_image);
-		
-		if (guiData != nullptr) {
-			guiData->TracedDepth = Settings::traceDepth;
-		}
 	}
 
 	// Send results to OpenGL buffer for rendering

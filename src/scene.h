@@ -9,6 +9,7 @@
 #include "sampler.h"
 #include "sceneStructs.h"
 #include "settings.h"
+#include "restir.h"
 #include "texture.h"
 #include <fstream>
 #include <map>
@@ -74,6 +75,13 @@ struct DevScene {
                 return dir.z > 0 ? 4 : 5;
             }
         }
+    }
+
+    __device__ float getPrimitiveArea(int primId) {
+        glm::vec3 v0 = devVertices[primId * 3 + 0];
+        glm::vec3 v1 = devVertices[primId * 3 + 1];
+        glm::vec3 v2 = devVertices[primId * 3 + 2];
+        return Math::triangleArea(v0, v1, v2);
     }
 
     /**
@@ -239,6 +247,8 @@ struct DevScene {
 
     /**
      * Shoot a ray from x to y and test occulsion.
+     * 
+     * @return true if shadow ray is occluded.
      */
     __device__ bool testOcclusion(glm::vec3 x, glm::vec3 y) {
         glm::vec3 dir = glm::normalize(y - x);
@@ -317,6 +327,27 @@ struct DevScene {
     }
 
     /**
+     * Simply pick a position from all lights and compute basic info.
+     * 
+     * @see ReSTIR::SampledLight
+     */
+    __device__ ReSTIR::SampledLight sampleOneLight(glm::vec4 r) {
+        int bucketId = static_cast<int>(r.x * numLightPrims);
+        int lightId = (r.y < devProbTable[bucketId]) ? bucketId : devAliasTable[bucketId];
+        int primId = devLightPrimIds[lightId];
+
+        glm::vec3 v0 = devVertices[primId * 3 + 0];
+        glm::vec3 v1 = devVertices[primId * 3 + 1];
+        glm::vec3 v2 = devVertices[primId * 3 + 2];
+        glm::vec3 sampled = Math::sampleTriangleUniform(v0, v1, v2, r.z, r.w);
+        
+        glm::vec3 normal = Math::triangleNormal(v0, v1, v2);
+
+        return { lightId, primId, sampled, normal };
+    }
+
+
+    /**
      * Randomly pick a light, test shadow ray.
      * 
      * @param pos: Current shading point
@@ -352,6 +383,66 @@ struct DevScene {
         wi = glm::normalize(posToSampled);
         float power = Math::luminance(radiance) /*/ (area * TWO_PI)*/;
         return Math::pdfAreaToSolidAngle(power * sumLightPowerInv, pos, sampled, normal);
+    }
+
+
+    __device__ glm::vec3 f_DI(
+        const Intersection& intersec,
+        ReSTIR::SampledLight& xi
+    ) {
+        if (testOcclusion(intersec.position, xi.position)) {
+            return glm::vec3(0.f);
+        }
+
+        const Material& material = devMaterials[intersec.materialId];
+        glm::vec3 wo = glm::normalize(xi.position - intersec.position);
+
+        glm::vec3 brdf = material.BSDF(intersec.normal, wo, intersec.inDir);
+        float G = Math::geometryTerm(intersec.position, xi.position, xi.normal);
+        glm::vec3 Le = devLightUnitRadiance[xi.lightId];
+        return brdf * G * Le;
+    }
+
+    /**
+     * p^ is the target function.
+     * brdf * G * Visibility * Le for now,
+     * but turned from vec3 to float by Math::luminance
+     */
+    __device__ float compute_p_hat(
+        const Intersection& intersec,
+        ReSTIR::SampledLight& xi
+    ) {
+        return Math::luminance(f_DI(intersec, xi));
+    }
+
+    __device__ ReSTIR::Reservoir RIS(
+        uint32_t M, 
+        Sampler& sampler,
+        const Intersection& intersec
+    ) {
+        ReSTIR::Reservoir r;
+        /** Other variables */
+        float p, p_hat;
+        float power_i;
+        glm::vec4 rand;
+        ReSTIR::SampledLight xi;
+
+        for (int i = 0; i < M; i++) {
+            rand = sampler.sample4D();
+            // generate x_i ~ p; where p is (power * sumLightPowerInv)
+            xi = sampleOneLight(rand);
+
+            // find p and p^
+            power_i = Math::luminance(devLightUnitRadiance[xi.lightId]);
+            p = power_i * sumLightPowerInv;
+            p_hat = compute_p_hat(intersec, xi);
+
+            // r.update( xi, p^(xi)/p(xi) )
+            r.update(xi, p_hat / p, sampler.sample1D());
+        }
+        r.W = r.w_sum / (compute_p_hat(intersec, r.y) * r.M);
+
+        return r;
     }
 };
 

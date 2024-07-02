@@ -12,7 +12,7 @@ struct ToneMapping {
 
 struct Tracer {
 	enum {
-		Streamed = 0, BVHVisualize = 1
+		Streamed = 0, BVHVisualize = 1, ReSTIR_DI = 2
 	};
 };
 

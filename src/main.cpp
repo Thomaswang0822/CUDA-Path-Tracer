@@ -22,7 +22,7 @@ glm::vec3 ogLookAt; // for recentering the camera
 Scene* scene;
 GuiDataContainer* guiData;
 RenderState* renderState;
-unsigned int iteration;
+unsigned int iteration;  // iteration counter of ImGui
 
 int width;
 int height;
@@ -146,6 +146,7 @@ void runCuda() {
 
 		// execute the kernel
 		int frame = 0;
+		//int actualIter = (Settings::tracer == Tracer::ReSTIR_DI) ? 1 : iteration;
 		pathtrace(pbo_dptr, frame, iteration);
 
 		// unmap buffer object

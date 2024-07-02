@@ -156,6 +156,11 @@ namespace Math {
         glm::vec3 yx = x - y;
         return pdf * glm::dot(yx, yx) / absDot(ny, glm::normalize(yx));
     }
+
+    __device__ inline float geometryTerm(glm::vec3 x, glm::vec3 y, glm::vec3 ny) {
+        glm::vec3 yx = x - y;
+        return absDot(ny, glm::normalize(yx)) / glm::dot(yx, yx);
+    }
 }
 
 
