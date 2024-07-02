@@ -116,6 +116,7 @@ __global__ void computeIntersections(
 						// MIS calculation
 						intersec.prevPos = pathSegment.ray.origin;
 						// intersec.prevBSDFPdf = segment.BSDFPdf;
+						intersec.prev = pathSegment.prev;
 					}
 			}
 			else {
@@ -413,12 +414,11 @@ void pathtrace(uchar4* pbo, int frame, int iter) {
 			{
 				guiData->TracedDepth = depth;
 			}
-
-			// Assemble this iteration and apply it to the image
-			dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-			int numEffectivePaths = static_cast<int>(next_thr_paths_done.get() - paths_done);
-			finalGather << <numBlocksPixels, blockSize1d >> > (numEffectivePaths, dev_image, paths_done);
-		}
+		}  // iteration finished
+		// Assemble this iteration and apply it to the image
+		dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
+		int numEffectivePaths = static_cast<int>(next_thr_paths_done.get() - paths_done);
+		finalGather << <numBlocksPixels, blockSize1d >> > (numEffectivePaths, dev_image, paths_done);
 	}
 	else {  // Visualize BVH only
 		const int BlockSizeSinglePTX = 8;
