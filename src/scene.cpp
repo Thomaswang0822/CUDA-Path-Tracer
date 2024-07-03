@@ -83,7 +83,11 @@ Image* Resource::loadTexture(const std::string& filename) {
     if (find != texturePool.end()) {
         return find->second;
     }
-    auto texture = new Image(filename);
+
+    std::filesystem::path full_path = scenes_path / filename;
+    const std::string full_path_string = full_path.string();
+    auto texture = new Image(full_path_string);
+
     texturePool[filename] = texture;
     return texture;
 }

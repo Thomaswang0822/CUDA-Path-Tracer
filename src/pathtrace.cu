@@ -214,7 +214,7 @@ __device__ Ray sampleCamera(DevScene* scene, const Camera& cam, int x, int y, gl
 }
 
 __global__ void generateRayFromCamera(
-	DevScene* scene, Camera cam, 
+	DevScene* scene, const Camera cam, 
 	int iter, int traceDepth, PathSegment* pathSegments
 ) {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
@@ -233,7 +233,7 @@ __global__ void generateRayFromCamera(
 	}
 }
 
-__global__ void previewGBuffer(int iter, DevScene* scene, Camera cam, glm::vec3* image, int kind) {
+__global__ void previewGBuffer(int iter, DevScene* scene, const Camera cam, glm::vec3* image, int kind) {
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
 	int y = blockDim.y * blockIdx.y + threadIdx.y;
 	if (x >= cam.resolution.x || y >= cam.resolution.y) {
@@ -251,7 +251,8 @@ __global__ void previewGBuffer(int iter, DevScene* scene, Camera cam, glm::vec3*
 	}
 	else if (kind == 1) {
 		if (intersec.primId != NullPrimitive) {
-			Material m = scene->getTexturedMaterialAndSurface(intersec);
+			const Material m = scene->getTexturedMaterialAndSurface(intersec);
+			// put 
 		}
 		image[index] += (intersec.norm + 1.f) * .5f;
 	}
@@ -279,7 +280,7 @@ __global__ void computeIntersections(
 	}
 
 	Intersection intersec;
-	PathSegment segment = pathSegments[pathIdx];
+	PathSegment& segment = pathSegments[pathIdx];
 #if ENABLE_GBUFFER
 	if (depth == 0) {
 		intersections[pathIdx] = GBuffer[pathIdx];
@@ -323,7 +324,7 @@ __global__ void computeIntersections(
 	intersections[pathIdx] = intersec;
 }
 
-__global__ void pathIntegSampleSurface(
+__global__ void shadePT(
 	int iter,
 	int depth,
 	PathSegment* segments,
@@ -367,7 +368,7 @@ __global__ void pathIntegSampleSurface(
 
 	Sampler rng = makeSeededRandomEngine(iter, idx, 4 + depth * SamplesOneIter, scene->sampleSequence);
 
-	Material material = scene->getTexturedMaterialAndSurface(intersec);
+	const Material material = scene->getTexturedMaterialAndSurface(intersec);
 
 	glm::vec3 accRadiance(0.f);
 
@@ -436,7 +437,7 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
 	int index = (blockIdx.x * blockDim.x) + threadIdx.x;
 
 	if (index < nPaths) {
-		PathSegment iterationPath = iterationPaths[index];
+		const PathSegment& iterationPath = iterationPaths[index];
 		if (iterationPath.pixelIndex >= 0 && iterationPath.remainingBounces <= 0) {
 			glm::vec3 r = iterationPath.radiance;
 			if (isnan(r.x) || isnan(r.y) || isnan(r.z) || isinf(r.x) || isinf(r.y) || isinf(r.z)) {
@@ -509,6 +510,7 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene* scene, Camera c
 			break;
 		}
 		else if (sample.pdf < 1e-8f) {
+			// also for numerically unstable pdf
 			break;
 		}
 
@@ -643,7 +645,7 @@ void pathTrace(uchar4* pbo, int frame, int iter) {
 			const int BlockSizeSample = 64;
 			int blockNumSample = (numPaths + BlockSizeSample - 1) / BlockSizeSample;
 
-			pathIntegSampleSurface<<<blockNumSample, BlockSizeSample>>>(
+			shadePT<<<blockNumSample, BlockSizeSample>>>(
 				iter, depth, devPaths, devIntersections, hstScene->devScene, numPaths, Settings::sortMaterial
 			);
 			checkCUDAError("PT::sampleSurface");

@@ -4,7 +4,7 @@ FovY        22
 LensRadius	0.1
 FocalDist	11
 ApertureMask	Null
-Sample		256
+Sample		1024
 Depth		8
 File        Cornell
 Eye         0 0 10
@@ -17,7 +17,6 @@ Type		Light
 Metallic	0
 Roughness	1
 Ior			0
-Emittance	1
 NormalMap	Null
 
 Material White
@@ -70,15 +69,15 @@ NormalMap	Null
 
 Material 	AlienMetal
 Type		MetallicWorkflow
-BaseColor	1 0 0
+BaseColor	texture/sci-fi-panel1-albedo.png
 Metallic	1
 Roughness	0.3
 Ior		0
-NormalMap	Null
+NormalMap	texture/sci-fi-panel1-normal.png
 
 Material 	Textured2
 Type		Lambertian
-BaseColor	0 0 1
+BaseColor	texture/fleshy_granite1_albedo.png
 Metallic	0
 Roughness	0.2
 Ior		0
@@ -107,7 +106,7 @@ Scale		3 3 3
 
 Object Back
 model/square.obj
-Material 	White
+Material 	Textured2
 Translate	0 0 -3
 Rotate	90 0 0
 Scale		4 3 3
