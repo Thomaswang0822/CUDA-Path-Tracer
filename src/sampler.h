@@ -1,178 +1,231 @@
 #pragma once
 
-#include <cuda_runtime.h>
-#include <glm/glm.hpp>
+#include <iostream>
 #include <thrust/random.h>
-#include <vector>
-#include <numeric> // For std::accumulate
-#include <algorithm> // For std::transform
-#include <stack>
+#include "mathUtil.h"
 #include "cudaUtil.h"
+#include "common.h"
 
-
-/**
- * Handy-dandy hash function that provides seeds for random number generation.
- */
-__host__ __device__ inline unsigned int utilhash(unsigned int a) {
-    a = (a + 0x7ed55d16) + (a << 12);
-    a = (a ^ 0xc761c23c) ^ (a >> 19);
-    a = (a + 0x165667b1) + (a << 5);
-    a = (a + 0xd3a2646c) ^ (a << 9);
-    a = (a + 0xfd7046c5) + (a << 3);
-    a = (a ^ 0xb55a4f09) ^ (a >> 16);
-    return a;
-}
-
-__host__ __device__ static
-thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth) {
-	int h = utilhash((1 << 31) | (depth << 22) | iter) ^ utilhash(index);
-	return thrust::default_random_engine(h);
-}
+#if SAMPLER_USE_SOBOL
+#define SobolSampleNum 10000
+#define SobolSampleDim 200
 
 struct Sampler {
-    thrust::default_random_engine rng;
-    thrust::uniform_real_distribution<float> u01;
+	__device__ Sampler() = default;
 
-    // constructor
-    __host__ __device__
-    Sampler(int iter = 0, int threadIdx = 0, int recurDepth = 0) {
-        rng = makeSeededRandomEngine(iter, threadIdx, recurDepth);
-        u01 = thrust::uniform_real_distribution<float>(0, 1);
-    }
+	__device__ Sampler(int ptr, uint32_t scramble, uint32_t* data) :
+		ptr(ptr), scramble(scramble), data(data) {}
 
-    __host__ __device__ inline float sample1D() {
-        return u01(rng);
-    }
+	__device__ float sample() {
+		uint32_t r = data[ptr++] ^ scramble;
+		scramble = Math::utilhash(scramble);
+		return r * 0x1p-32f;
+	}
 
-    __host__ __device__ inline glm::vec2 sample2D() {
-        return glm::vec2(u01(rng), u01(rng));
-    }
-
-    __host__ __device__ inline glm::vec3 sample3D() {
-        return glm::vec3(u01(rng), u01(rng), u01(rng));
-    }
-
-    __host__ __device__ inline glm::vec4 sample4D() {
-        return glm::vec4(u01(rng), u01(rng), u01(rng), u01(rng));
-    }
+	uint32_t* data;
+	uint32_t scramble;
+	int ptr;
 };
 
-#pragma region LightSampler
-struct Slot {
-    float prob;
-    int aliasId;
-};
+__device__ static Sampler makeSeededRandomEngine(int iter, int index, int dim, uint32_t* data) {
+	return Sampler(iter * SobolSampleDim + dim, Math::utilhash(index), data);
+}
 
-/**
- * Vose's Alias Method to sample from a discrete distribution in O(1).
- * 
- * @see https://keithschwarz.com/darts-dice-coins/
- * @ref Vose, Michael D. "A linear algorithm for generating random numbers with a given distribution." IEEE Transactions on software engineering 17.9 (1991): 972-975.
- */
-struct LightSampler {
-    /** Data */
-    std::vector<float> probTable;
-    std::vector<int> aliasTable;
-    size_t N;
+__device__ inline float sample1D(Sampler& sampler) {
+	return sampler.sample();
+}
 
-    LightSampler() = default;
-    /**
-     * Actual constructor.
-     * 
-     * @param values: It stores luminance*area of all lighting TRIANGLES in the scene.
-     */
-    LightSampler(std::vector<float> values) {
-        N = values.size();
-        probTable.resize(N);
-        aliasTable.resize(N);
+#else
+using Sampler = thrust::default_random_engine;
 
-        /// normalization to 1 and multiplication by N together: N / sum(values)
-        /// learned 2 new std functions ^()^
-        float norm_factor = static_cast<float>(values.size()) / 
-            std::accumulate(values.begin(), values.end(), 0.0f);
-        // values = [k * norm_factor for k in values]; contains scaled probabilities now
-        std::transform(values.begin(), values.end(), values.begin(),
-            [norm_factor](float k) { return k * norm_factor; });
+__device__ static Sampler makeSeededRandomEngine(int iter, int index, int dim, uint32_t* data) {
+	int h = Math::utilhash((1 << 31) | (dim << 22) | iter) ^ Math::utilhash(index);
+	return Sampler(h);
+}
 
-        /// Create two worklists (stacks), Small and Large
-        /// Use vector as stack to save memory: https://stackoverflow.com/a/71677261/14697376
-        /// Init size to 2N because we don't pop from it
-        std::stack<int> small, large;
-        for (int i = 0; i < N; i++) {
-            (values[i] < 1.f ? small : large).push(i);
-        }
-        
-        int l, g;  // top element of small and large
-        /// main loop: keep cutting from great (scaled prob >= 1)
-        /// such that (cut portion + less == 1)
-        while (!small.empty() && !large.empty()) {
-            l = small.top();    small.pop();
-            g = large.top();    large.pop();
-            // only update data for l
-            probTable[l] = values[l];
-            aliasTable[l] = g;
-            // "pollute" scaled prob of g and add it back
-            values[g] = values[g] + values[l] - 1.f;
-            (values[g] < 1.f ? small : large).push(g);
-        }
+__device__ inline float sample1D(Sampler& sampler) {
+	return thrust::uniform_real_distribution<float>(0.f, 1.f)(sampler);
+}
+#endif
 
-        /// some polluted scaled probs which should be exactly == 1
-        /// second loop merely for numerical issue.
-        while (!large.empty()) {
-            g = large.top();    large.pop();
-            probTable[g] = 1.f;
-            aliasTable[g] = g;
-        }
-        while (!small.empty()) {
-            l = small.top();    small.pop();
-            probTable[l] = 1.f;
-            aliasTable[l] = l;
-        }
-    }
+__device__ inline glm::vec2 sample2D(Sampler& sampler) {
+	return glm::vec2(sample1D(sampler), sample1D(sampler));
+}
 
-    inline int sample(float r1, float r2) {
-        // pick a bucket
-        int bucketId = static_cast<int>(r1 * N);
-        return (r2 < probTable[bucketId]) ? bucketId : aliasTable[bucketId];
-    }
+__device__ inline glm::vec3 sample3D(Sampler& sampler) {
+	return glm::vec3(sample2D(sampler), sample1D(sampler));
+}
+
+__device__ inline glm::vec4 sample4D(Sampler& sampler) {
+	return glm::vec4(sample3D(sampler), sample1D(sampler));
+}
+
+template<typename T>
+struct BinomialDistrib {
+	T prob;
+	int failId;
 };
 
 /**
- * LightSampler used on device. Its data (alias table) is copied from a LightSampler
- * 
- * @code Can I just use unified memory to save the trouble?
- */
-struct DevLightSampler {
-    /** Same data */
-    float* probTable = nullptr;
-    int* aliasTable = nullptr;
-    size_t N;
+* Transform a discrete distribution to a set of binomial distributions
+*   so that an O(1) sampling approach can be applied
+*/
+template<typename T>
+struct DiscreteSampler1D {
+	using DistribT = BinomialDistrib<T>;
 
-    /** Different constructor */
-    DevLightSampler() = default;
-    DevLightSampler(const LightSampler& hostSampler) {
-        N = hostSampler.N;
-        // int and float are both 4 bytes
-        size_t byteSize = sizeof(float) * N;
+	DiscreteSampler1D() = default;
 
-        // malloc and copy
-        cudaMalloc(&probTable, byteSize);
-        Cuda::memcpyHostToDev(probTable, hostSampler.probTable.data(), byteSize);
-        cudaMalloc(&aliasTable, byteSize);
-        Cuda::memcpyHostToDev(aliasTable, hostSampler.aliasTable.data(), byteSize);
-    }
+	DiscreteSampler1D(std::vector<T> values) {
+		for (const auto& val : values) {
+			sumAll += val;
+		}
+		T sumInv = static_cast<T>(values.size()) / sumAll;
 
-    ~DevLightSampler() {
-        Cuda::safeFree(probTable);
-        Cuda::safeFree(aliasTable);
-    }
+		for (auto& val : values) {
+			val *= sumInv;
+		}
 
-    __device__ int sample(float r1, float r2) {
-        // pick a bucket
-        int bucketId = static_cast<int>(r1 * N);
-        return (r2 < probTable[bucketId]) ? bucketId : aliasTable[bucketId];
-    }
+		binomDistribs.resize(values.size());
+		std::vector<DistribT> stackGtOne(values.size() * 2);
+		std::vector<DistribT> stackLsOne(values.size() * 2);
+		int topGtOne = 0;
+		int topLsOne = 0;
 
-    
+		for (int i = 0; i < values.size(); i++) {
+			auto& val = values[i];
+			(val > static_cast<T>(1) ? stackGtOne[topGtOne++] : stackLsOne[topLsOne++]) = DistribT{ val, i };
+		}
+
+		while (topGtOne && topLsOne) {
+			DistribT gt = stackGtOne[--topGtOne];
+			DistribT ls = stackLsOne[--topLsOne];
+
+			binomDistribs[ls.failId] = DistribT{ ls.prob, gt.failId };
+			// Place ls in the table, and "fill" the rest of probability with gt.prob
+			gt.prob -= (static_cast<T>(1) - ls.prob);
+			// See if gt.prob is still greater than 1 that it needs more iterations to
+			//   be splitted to different binomial distributions
+			(gt.prob > static_cast<T>(1) ? stackGtOne[topGtOne++] : stackLsOne[topLsOne++]) = gt;
+		}
+
+		for (int i = topGtOne - 1; i >= 0; i--) {
+			DistribT gt = stackGtOne[i];
+			binomDistribs[gt.failId] = gt;
+		}
+
+		for (int i = topLsOne - 1; i >= 0; i--) {
+			DistribT ls = stackLsOne[i];
+			binomDistribs[ls.failId] = ls;
+		}
+	}
+
+	void clear() {
+		binomDistribs.clear();
+		sumAll = static_cast<T>(0);
+	}
+
+	int sample(float r1, float r2) {
+		int passId = int(float(binomDistribs.size()) * r1);
+		DistribT distrib = binomDistribs[passId];
+		return (r2 < distrib.prob) ? passId : distrib.failId;
+	}
+
+	std::vector<DistribT> binomDistribs;
+	T sumAll = static_cast<T>(0);
 };
-#pragma endregion
+
+template<typename T>
+struct DiscreteSampler2D {
+	using DistribT = BinomialDistrib<T>;
+
+	DiscreteSampler2D() = default;
+
+	DiscreteSampler2D(const T* data, int width, int height) {
+		columnSamplers.resize(height);
+		std::vector<T> sumRows(height);
+		std::vector<T> rowData(width);
+
+		for (int i = 0; i < height; i++) {
+			for (int j = 0; j < width; j++) {
+				sumRows[i] += data[i * width + j];
+			}
+			float sumRowInv = static_cast<T>(1) / sumRows[i];
+
+			for (int j = 0; j < width; j++) {
+				rowData[j] = data[i * width + j] * sumRowInv;
+			}
+			columnSamplers[i] = DiscreteSampler1D<T>(rowData);
+			sumAll += sumRows[i];
+		}
+
+		T sumAllInv = static_cast<T>(1) / sumAll;
+		for (int i = 0; i < height; i++) {
+			sumRows[i] *= sumAllInv;
+		}
+		rowSampler = DiscreteSampler1D<T>(sumRows);
+	}
+
+	void clear() {
+		columnSamplers.clear();
+		rowSampler.clear();
+		sumAll = static_cast<T>(0);
+	}
+
+	std::pair<int, int> sample(float r1, float r2, float r3, float r4) {
+		int row = rowSampler.sample(r1, r2);
+		int column = columnSamplers[row].sample(r3, r4);
+		return { row, column };
+	}
+
+	std::vector<DiscreteSampler1D<T>> columnSamplers;
+	DiscreteSampler1D<T> rowSampler;
+	T sumAll = static_cast<T>(0);
+};
+
+template<typename T>
+struct DevDiscreteSampler1D {
+	using DistribT = BinomialDistrib<T>;
+
+	void create(const DiscreteSampler1D<T>& hstSampler) {
+		size_t size = byteSizeOf<DistribT>(hstSampler.binomDistribs);
+		cudaMalloc(&devBinomDistribs, size);
+		cudaMemcpyHostToDev(devBinomDistribs, hstSampler.binomDistribs.data(), size);
+		length = hstSampler.binomDistribs.size();
+	}
+
+	void destroy() {
+		cudaSafeFree(devBinomDistribs);
+		length = 0;
+	}
+
+	__device__ int sample(float r1, float r2) {
+		int passId = glm::min(int(float(length) * r1), length - 1);
+		DistribT distrib = devBinomDistribs[passId];
+		return (r2 < distrib.prob) ? passId : distrib.failId;
+	}
+
+	DistribT* devBinomDistribs = nullptr;
+	int length = 0;
+};
+
+/**
+* Since 2D distribution can be rearranged to 1D distribution,
+*   this class is unused
+* Sampling 2D distribution with alias sampling table consumes
+*   two more random numbers than 1D
+*/
+template<typename T>
+struct DevDiscreteSampler2D {
+	using DistribType = BinomialDistrib<T>;
+
+	void create(const std::vector<DiscreteSampler1D<T>>& hstSamplers) {
+
+		width = hstSamplers[0].size();
+		height = hstSamplers.size();
+	}
+
+	T* devBinomDistribs = nullptr;
+	int width = 0;
+	int height = 0;
+};

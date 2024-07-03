@@ -5,7 +5,6 @@
 #include "ImGui/imgui.h"
 #include "ImGui/imgui_impl_glfw.h"
 #include "ImGui/imgui_impl_opengl3.h"
-
 GLuint positionLocation = 0;
 GLuint texcoordsLocation = 1;
 GLuint pbo;
@@ -110,9 +109,8 @@ void cleanupCuda() {
 }
 
 void initCuda() {
-	/// DEPRECATED starting CUDA 5.0
-	/*cudaGLSetGLDevice(0);
-	checkCUDAError("cudaGLSetDevice");*/
+	cudaGLSetGLDevice(0);
+	checkCUDAError("cudaGLSetDevice");
 
 	// Clean up on program exit
 	atexit(cleanupCuda);
@@ -154,6 +152,7 @@ bool init() {
 	}
 	glfwMakeContextCurrent(window);
 	glfwSetKeyCallback(window, keyCallback);
+	glfwSetScrollCallback(window, mouseScrollCallback);
 	glfwSetCursorPosCallback(window, mousePositionCallback);
 	glfwSetMouseButtonCallback(window, mouseButtonCallback);
 
@@ -162,7 +161,7 @@ bool init() {
 	if (glewInit() != GLEW_OK) {
 		return false;
 	}
-	printf("Opengl Version:%s\n", glGetString(GL_VERSION));
+	//printf("Opengl Version:%s\n", glGetString(GL_VERSION));
 	//Set up ImGui
 
 	IMGUI_CHECKVERSION();
@@ -191,15 +190,13 @@ bool init() {
 	return true;
 }
 
-void InitImguiData(GuiDataContainer* guiData)
-{
+void InitImguiData(GuiDataContainer* guiData) {
 	imguiData = guiData;
 }
 
 
 // LOOK: Un-Comment to check ImGui Usage
-void RenderImGui()
-{
+void RenderImGui() {
 	mouseOverImGuiWinow = io->WantCaptureMouse;
 
 	ImGui_ImplOpenGL3_NewFrame();
@@ -212,51 +209,80 @@ void RenderImGui()
 	static float f = 0.0f;
 	static int counter = 0;
 
-#pragma region analytics
-	ImGui::Begin("Path Tracer Analytics");                  // Create a window called "Hello, world!" and append into it.
-	
-	// LOOK: Un-Comment to check the output window and usage
-	//ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
-	//ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
-	//ImGui::Checkbox("Another Window", &show_another_window);
+	ImGui::Begin("Path Tracer Analytics", nullptr,
+		ImGuiWindowFlags_NoMove |
+		ImGuiWindowFlags_NoDecoration |
+		ImGuiWindowFlags_AlwaysAutoResize |
+		ImGuiWindowFlags_NoSavedSettings |
+		ImGuiWindowFlags_NoFocusOnAppearing |
+		ImGuiWindowFlags_NoNav); {
+		ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
+		ImGui::Text("BVH Size %d", scene->BVHSize);
+		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 
-	//ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
-	//ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
-
-	//if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
-	//	counter++;
-	//ImGui::SameLine();
-	//ImGui::Text("counter = %d", counter);
-	ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
-	ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
-	ImGui::End();
-#pragma endregion
-
-#pragma region runtime settings
-	ImGui::Begin("Options");
-	/// ImGui::Combo(const char* label, int* current_item, const char* const items[], int items_count, int height_in_items)
-	const char* Tracers[] = { "Streamed", "BVH Visualize", "ReSTIR_DI"};
-	if (ImGui::Combo("Tracer", &Settings::tracer, Tracers, IM_ARRAYSIZE(Tracers))) {
-		State::camChanged = true;
+		ImGui::End();
 	}
-	if (ImGui::InputInt("Max Depth", &Settings::traceDepth, 1, 1)) {
-		State::camChanged = true;
-	}
-	ImGui::Separator();
-	ImGui::Text("Post Processing");
-	const char* ToneMappingMethods[] = { "None", "ACES" };
-	ImGui::Combo("Tone Mapping", &Settings::toneMapping, ToneMappingMethods, IM_ARRAYSIZE(ToneMappingMethods));
-	ImGui::End();
-#pragma endregion
 
+	ImGui::Begin("Options"); {
+		const char* Tracers[] = { "Streamed", "Single Kernel", "BVH Visualize", "GBuffer Preview" };
+		if (ImGui::Combo("Tracer", &Settings::tracer, Tracers, IM_ARRAYSIZE(Tracers))) {
+			State::camChanged = true;
+		}
+
+		if (Settings::tracer == Tracer::Streamed) {
+			ImGui::Checkbox("Sort Material", &Settings::sortMaterial);
+		}
+		else if (Settings::tracer == Tracer::GBufferPreview) {
+			const char* Modes[] = { "Position", "Normal", "Texcoord" };
+			if (ImGui::Combo("Mode", &Settings::GBufferPreviewOpt, Modes, IM_ARRAYSIZE(Modes))) {
+				State::camChanged = true;
+			}
+		}
+
+		if (ImGui::InputInt("Max Depth", &Settings::traceDepth, 1, 1)) {
+			State::camChanged = true;
+		}
+		ImGui::Separator();
+
+		ImGui::Text("Post Processing");
+		const char* ToneMappingMethods[] = { "None", "Filmic", "ACES" };
+		ImGui::Combo("Tone Mapping", &Settings::toneMapping, ToneMappingMethods, IM_ARRAYSIZE(ToneMappingMethods));
+
+		ImGui::End();
+	}
+
+	ImGui::Begin("Camera"); {
+		auto& cam = scene->camera;
+
+		glm::vec3 lastPos = cam.position;
+		if (ImGui::DragFloat3("Position", glm::value_ptr(cam.position), .1f)) {
+			State::camChanged = true;
+		}
+
+		if (ImGui::DragFloat3("Rotation", glm::value_ptr(cam.rotation), .1f)) {
+			State::camChanged = true;
+		}
+
+		if (ImGui::SliderFloat("FOV", &cam.fov.y, .1f, 45.f, "%.1f deg")) {
+			State::camChanged = true;
+		}
+
+		if (ImGui::DragFloat("Aperture", &cam.lensRadius, .01f, 0.f, 3.f)) {
+			State::camChanged = true;
+		}
+		if (ImGui::DragFloat("Focal", &cam.focalDist, .1f, 0.f, FLT_MAX, "%.1f m")) {
+			State::camChanged = true;
+		}
+
+		ImGui::End();
+	}
 
 	ImGui::Render();
 	ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
 }
 
-bool MouseOverImGuiWindow()
-{
+bool MouseOverImGuiWindow() {
 	return mouseOverImGuiWinow;
 }
 
@@ -267,7 +293,7 @@ void mainLoop() {
 
 		runCuda();
 
-		string title = "CUDA Path Tracer | " + Core::convertIntToString(iteration) + " Iterations";
+		string title = "CIS565 Path Tracer | " + utilityCore::convertIntToString(iteration) + " Iterations";
 		glfwSetWindowTitle(window, title.c_str());
 		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
 		glBindTexture(GL_TEXTURE_2D, displayImage);

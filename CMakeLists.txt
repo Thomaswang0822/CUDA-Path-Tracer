@@ -70,7 +70,7 @@ include_directories(${GLM_INCLUDE_DIRS})
 set(SRC_RECURSIVE 
     ${CMAKE_SOURCE_DIR}/src 
     ${CMAKE_SOURCE_DIR}/src/ImGui
-    ${CMAKE_SOURCE_DIR}/src/TinyObjLoader
+    # ${CMAKE_SOURCE_DIR}/src/TinyObjLoader
 )
 
 # Initialize empty lists for headers and sources

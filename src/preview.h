@@ -1,10 +1,9 @@
 #pragma once
 
-#include "utilities.h"
-#include <GL/gl.h>
-#include <string>
+#include "common.h"
 
 extern GLuint pbo;
+extern Scene* hstScene;
 
 std::string currentTimeString();
 bool init();

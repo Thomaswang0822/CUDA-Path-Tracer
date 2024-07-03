@@ -1,135 +1,174 @@
 #pragma once
 
-#include "camera.h"
-#include "utilities.h"
-#include <sstream>  // for std::stringstream
-#include <string>
+#include <iostream>
+#include <sstream>
 #include <vector>
+#include <glm/glm.hpp>
+#include <glm/gtx/intersect.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
-/** Constants */
-#define NUM_FACES 6  // 6 major directions
+#include "sceneStructs.h"
+#include "mathUtil.h"
+
 #define NullPrimitive -1
 
-/**
- * Axis-aligned bounding box.
- */
 struct AABB {
-    glm::vec3 minPos;
-    glm::vec3 maxPos;
+    AABB() = default;
 
-    /** Constructors */
-    AABB() : minPos(FLT_MAX), maxPos(-FLT_MAX) {};
-    AABB(glm::vec3 pmin, glm::vec3 pmax) : minPos(pmin), maxPos(pmax) {};
-    // box 3 positions, likely a triangle
-    AABB(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2) :
-        minPos(glm::min(p0, glm::min(p1, p2))), maxPos(glm::max(p0, glm::max(p1, p2))) {};
-    // combine 2 AABB
-    AABB(const AABB& boxA, const AABB& boxB) :
-        minPos(glm::min(boxA.minPos, boxB.minPos)), maxPos(glm::min(boxA.maxPos, boxB.maxPos)) {};
-    /** 2 more ways to build new AABB */
-    AABB operator() (glm::vec3 p) {
-        return { glm::min(minPos, p), glm::max(maxPos, p) };
-    }
-    AABB operator() (const AABB& rhs) {
-        return { glm::min(minPos, rhs.minPos), glm::max(maxPos, rhs.maxPos) };
+    AABB(glm::vec3 pMin, glm::vec3 pMax) : pMin(pMin), pMax(pMax) {}
+
+    AABB(glm::vec3 va, glm::vec3 vb, glm::vec3 vc) :
+        pMin(glm::min(glm::min(va, vb), vc)), pMax(glm::max(glm::max(va, vb), vc)) {}
+
+    AABB(const AABB& a, const AABB& b) :
+        pMin(glm::min(a.pMin, b.pMin)), pMax(glm::min(a.pMax, b.pMax)) {}
+
+    AABB operator () (glm::vec3 p) {
+        return { glm::min(pMin, p), glm::max(pMax, p) };
     }
 
-    /** Helpers */
+    AABB operator () (const AABB& rhs) {
+        return { glm::min(pMin, rhs.pMin), glm::max(pMax, rhs.pMax) };
+    }
+
     std::string toString() const {
         std::stringstream ss;
-        ss << "[AABB " << "pMin = " << Core::vec3ToString(minPos);
-        ss << ", pMax = " << Core::vec3ToString(maxPos);
-        ss << ", center = " << Core::vec3ToString(this->center()) << "]";
+        ss << "[AABB " << "pMin = " << vec3ToString(pMin);
+        ss << ", pMax = " << vec3ToString(pMax);
+        ss << ", center = " << vec3ToString(this->center()) << "]";
         return ss.str();
     }
 
-    /** Member functions */
-    __host__ __device__ inline glm::vec3 center() const {
-        return 0.5f * (minPos + maxPos);
+    __host__ __device__ glm::vec3 center() const {
+        return (pMin + pMax) * .5f;
     }
 
-    __host__ __device__ inline float surfaceArea() const {
-        glm::vec3 size3D = maxPos - minPos;
-        return 2.0f * (size3D.x * size3D.y + size3D.x * size3D.z + size3D.y * size3D.z);
-    }
-
-    __host__ __device__ inline int longestAxis() const {
-        glm::vec3 size3D = maxPos - minPos;
-        if (size3D.x < size3D.y) {  // compare Y and Z
-            return (size3D.y < size3D.z) ? 2 : 1;
-        }
-        else { // compare X and Z
-            return (size3D.x < size3D.z) ? 2 : 0;
-        }
+    __host__ __device__ float surfaceArea() const {
+        glm::vec3 size = pMax - pMin;
+        return 2.f * (size.x * size.y + size.y * size.z + size.z * size.x);
     }
 
     /**
-     * (AABB) test intersection against a Ray.
-     * 
-     * @param dist The current shortest hit distance. Hits further than it will be ignored.
-     * @return true if a valid (shorter) hit occurs. dist will be modified if true.
-     */
-    __host__ __device__ bool intersect(const Ray& ray, float& dist) {
+    * Returns 0 for X, 1 for Y, 2 for Z
+    */
+    __host__ __device__ int longestAxis() const {
+        glm::vec3 size = pMax - pMin;
+        if (size.x < size.y) {
+            return size.y > size.z ? 1 : 2;
+        }
+        else {
+            return size.x > size.z ? 0 : 2;
+        }
+    }
+
+    __host__ __device__ bool getDistMinMax(float tMin1, float tMin2, float tMax1, float tMax2, float& tMin) {
+        tMin = fminf(tMin1, tMin2);
+        float tMax = fmaxf(tMax1, tMax2);
+        return (tMax >= 0.f && tMax >= tMin);
+    }
+
+    __host__ __device__ bool getDistMaxMin(float tMin1, float tMin2, float tMax1, float tMax2, float& tMin) {
+        tMin = fmaxf(tMin1, tMin2);
+        float tMax = fminf(tMax1, tMax2);
+        return (tMax >= 0.f && tMax >= tMin);
+    }
+
+    /**
+    * Manually unrolled intersection test
+    * This is tested 20% faster than other implementations
+    */
+    __host__ __device__ bool intersect(Ray ray, float& tMin) {
+        const float Eps = 1e-6f;
         glm::vec3 ori = ray.origin;
         glm::vec3 dir = ray.direction;
 
-        glm::vec3 t1 = (minPos - ori) / dir;
-        glm::vec3 t2 = (maxPos - ori) / dir;
-
-        glm::vec3 ta = glm::min(t1, t2);
-        glm::vec3 tb = glm::max(t1, t2);
-
-        float tMin = -FLT_MAX, tMax = FLT_MAX;
-
-        for (int i = 0; i < 3; i++) {
-            if (glm::abs(dir[i]) > EPSILON) {
-                if (tb[i] >= 0.f && tb[i] >= ta[i]) {
-                    tMin = glm::max(tMin, ta[i]);
-                    tMax = glm::min(tMax, tb[i]);
-                }
+        if (glm::abs(dir.x) > 1.f - Eps) {
+            if (Math::between(ori.y, pMin.y, pMax.y) && Math::between(ori.z, pMin.z, pMax.z)) {
+                float dirInvX = 1.f / dir.x;
+                float t1 = (pMin.x - ori.x) * dirInvX;
+                float t2 = (pMax.x - ori.x) * dirInvX;
+                return getDistMinMax(t1, t2, t1, t2, tMin);
+            }
+            else {
+                return false;
             }
         }
-        dist = tMin;
-
-        if (tMax >= 0.f && tMax >= tMin - EPSILON) {
-            glm::vec3 mid = ray.getPoint((tMin + tMax) * .5f);
-
-            for (int i = 0; i < 3; i++) {
-                if (mid[i] <= minPos[i] - EPSILON || mid[i] >= maxPos[i] + EPSILON) {
-                    return false;
-                }
+        else if (glm::abs(dir.y) > 1.f - Eps) {
+            if (Math::between(ori.z, pMin.z, pMax.z) && Math::between(ori.x, pMin.x, pMax.x)) {
+                float dirInvY = 1.f / dir.y;
+                float t1 = (pMin.y - ori.y) * dirInvY;
+                float t2 = (pMax.y - ori.y) * dirInvY;
+                return getDistMinMax(t1, t2, t1, t2, tMin);
             }
-            return true;
+            else {
+                return false;
+            }
+        }
+        else if (glm::abs(dir.z) > 1.f - Eps) {
+            if (Math::between(ori.x, pMin.x, pMax.x) && Math::between(ori.y, pMin.y, pMax.y)) {
+                float dirInvZ = 1.f / dir.z;
+                float t1 = (pMin.z - ori.z) * dirInvZ;
+                float t2 = (pMax.z - ori.z) * dirInvZ;
+                return getDistMinMax(t1, t2, t1, t2, tMin);
+            }
+            else {
+                return false;
+            }
+        }
+        glm::vec3 dirInv = 1.f / dir;
+        glm::vec3 t1 = (pMin - ori) * dirInv;
+        glm::vec3 t2 = (pMax - ori) * dirInv;
+
+        glm::vec3 tNear = glm::min(t1, t2);
+        glm::vec3 tFar = glm::max(t1, t2);
+
+        glm::vec3 tDist = tFar - tNear;
+
+        float yz = tFar.z - tNear.y;
+        float zx = tFar.x - tNear.z;
+        float xy = tFar.y - tNear.x;
+
+        if (glm::abs(dir.x) < Eps && tDist.y + tDist.z > yz) {
+            return getDistMaxMin(tNear.y, tNear.z, tFar.y, tFar.z, tMin);
+        }
+
+        if (glm::abs(dir.y) < Eps && tDist.z + tDist.x > zx) {
+            return getDistMaxMin(tNear.z, tNear.x, tFar.z, tFar.x, tMin);
+        }
+
+        if (glm::abs(dir.z) < Eps && tDist.x + tDist.y > xy){
+            return getDistMaxMin(tNear.x, tNear.y, tFar.x, tFar.y, tMin);
+        }
+
+        if (tDist.y + tDist.z > yz && tDist.z + tDist.x > zx && tDist.x + tDist.y > xy)
+        {
+            return getDistMaxMin(
+                fmaxf(tNear.x, tNear.y), tNear.z, 
+                fminf(tFar.x, tFar.y), tFar.z, tMin
+            );
         }
         return false;
     }
+
+    glm::vec3 pMin = glm::vec3(FLT_MAX);
+    glm::vec3 pMax = glm::vec3(-FLT_MAX);
 };
 
-/**
- * Multi-Threaded BVH (bounding volume hierarchy)
- * MTBVH enables stackless BVH traversal on GPU, saving many registers that were used in stack-based
- * traversal. It's simple and efficient.
- * 
- * @see https://cs.uwaterloo.ca/~thachisu/tdf2015.pdf
- */
 struct MTBVHNode {
-    int primitiveId;  // which triangle, -1 if non-leaf
-    int boundingBoxId;  // which AABB
-    int nextNodeIfMiss;  // next node if one ray misses this node.
-
     MTBVHNode() = default;
     MTBVHNode(int primId, int boxId, int next) :
         primitiveId(primId), boundingBoxId(boxId), nextNodeIfMiss(next) {}
+
+    int primitiveId;
+    int boundingBoxId;
+    int nextNodeIfMiss;
 };
 
-/**
- * MTBVH builder
- */
 class BVHBuilder {
 private:
     struct NodeInfo {
         bool isLeaf;
-        int primIdOrSize;  // leaf-node ? which_triangle : #triangles
+        int primIdOrSize;
     };
 
     struct PrimInfo {
@@ -144,15 +183,16 @@ private:
         int end;
     };
 
+public:
+    static int build(
+        const std::vector<glm::vec3>& vertices, 
+        std::vector<AABB>& boundingBoxes,
+        std::vector<std::vector<MTBVHNode>>& BVHNodes);
+
+private:
     static void buildMTBVH(
         const std::vector<AABB>& boundingBoxes,
         const std::vector<NodeInfo>& nodeInfo,
         int BVHSize,
-        std::vector<std::vector<MTBVHNode>>& BVHNodes);
-
-public:
-    static int build(
-        const std::vector<glm::vec3>& vertices,
-        std::vector<AABB>& boundingBoxes,
         std::vector<std::vector<MTBVHNode>>& BVHNodes);
 };

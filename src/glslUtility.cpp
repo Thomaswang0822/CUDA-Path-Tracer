@@ -2,10 +2,12 @@
 // Written by Varun Sampath, Patrick Cozzi, and Karl Li.
 // Copyright (c) 2012 University of Pennsylvania
 
-#include "glslUtility.hpp"
-
-#include <fstream>
 #include <iostream>
+#include <fstream>
+#include <string>
+#include <cstdlib>
+#include <cstring>
+#include "glslUtility.hpp"
 
 using std::ios;
 

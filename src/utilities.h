@@ -1,10 +1,10 @@
 #pragma once
 
-#include "cudaUtil.h"
-#include "debugUtil.h"
-#include "mathUtility.h"
-#include <glm/glm.hpp>
-#include <iostream>
+#include "glm/glm.hpp"
+#include <algorithm>
+#include <istream>
+#include <ostream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -16,20 +16,11 @@ public:
     int TracedDepth;
 };
 
-namespace Core {
+namespace utilityCore {
     extern float clamp(float f, float min, float max);
     extern bool replaceString(std::string& str, const std::string& from, const std::string& to);
-    extern glm::vec3 clampRGB(glm::vec3 color);
-    extern bool epsilonCheck(float a, float b);
+    extern glm::vec3 clampRGB(glm::vec3 baseColor);
     extern std::vector<std::string> tokenizeString(std::string str);
-    extern glm::mat4 buildTransformationMatrix(glm::vec3 translation, glm::vec3 rotation, glm::vec3 scale);
     extern std::string convertIntToString(int number);
     extern std::istream& safeGetline(std::istream& is, std::string& t); //Thanks to http://stackoverflow.com/a/6089413
-    extern std::string vec3ToString(const glm::vec3& vec);
-
-    template<typename T>
-    inline size_t byteSizeOf(const std::vector<T>& v) {
-        return v.size() * sizeof(T);
-    }
-
 }
