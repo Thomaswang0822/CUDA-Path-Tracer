@@ -3,6 +3,7 @@
 #include "intersections.h"
 #include <cstring>
 #include <random>
+#include <filesystem>
 
 static std::string startTimeString;
 
@@ -203,6 +204,9 @@ void saveImage() {
 	std::string filename = renderState->imageName;
 	std::ostringstream ss;
 	ss << filename << "." << startTimeString << "." << samples << "samp";
+	if (Settings::tracer == Tracer::ReSTIR_DI) {
+		ss << Settings::M_ReSTIR << "M";
+	}
 	filename = ss.str();
 
 	// CHECKITOUT

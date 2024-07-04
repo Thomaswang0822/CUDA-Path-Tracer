@@ -4,7 +4,7 @@ FovY        22
 LensRadius	0.1
 FocalDist	11
 ApertureMask	Null
-Sample		1024
+Sample		4
 Depth		1
 File        Cornell
 Eye         0 0 10

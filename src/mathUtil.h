@@ -46,6 +46,10 @@ namespace Math {
         return x * x;
     }
 
+    __host__ __device__ inline float balanceHeuristic(float f, float g) {
+        return f / (f + g);
+    }
+
     __host__ __device__ inline float powerHeuristic(float f, float g) {
         float f2 = f * f;
         return f2 / (f2 + g * g);

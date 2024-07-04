@@ -30,6 +30,7 @@ struct Settings {
     static int tracer;
     static bool sortMaterial;
     static int GBufferPreviewOpt;
+    static int M_ReSTIR;
 };
 
 struct State {

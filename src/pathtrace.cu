@@ -447,9 +447,7 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
     }
 }
 
-__global__ void shadeReSTIR_DI(int iter, int maxDepth, DevScene* scene, Camera cam, glm::vec3* image) {
-    const int M = 16;  // num of candidates
-
+__global__ void shadeReSTIR_DI(int iter, int M, DevScene* scene, Camera cam, glm::vec3* image) {
     int x = blockDim.x * blockIdx.x + threadIdx.x;
     int y = blockDim.y * blockIdx.y + threadIdx.y;
     if (x >= cam.resolution.x || y >= cam.resolution.y) {
@@ -515,7 +513,7 @@ __global__ void shadeReSTIR_DI(int iter, int maxDepth, DevScene* scene, Camera c
             }
             else {
                 p_hat = radiance * material.BSDF(intersec.norm, intersec.wo, wi) * Math::satDot(intersec.norm, wi);
-                w_proposal = ReSTIR::scalarWeight(p_hat, p);
+                w_proposal = ReSTIR::toScalar(p_hat) / (p * M);  // Note Eq 3.2
             }
 
             // Update reservoir even if sampling failed, otherwise biased.
@@ -530,7 +528,7 @@ __global__ void shadeReSTIR_DI(int iter, int maxDepth, DevScene* scene, Camera c
             material.BSDF(intersec.norm, intersec.wo, wi) *
             Math::satDot(intersec.norm, wi);
         float p_hat_q = ReSTIR::toScalar(p_hat);
-        r.W = r.w_sum / (p_hat_q * r.M);
+        r.W = r.w_sum / p_hat_q;  // Note Eq 3.2
         
         // Algorithm 3 line 11
         glm::vec3 f_q = r.y.radiance *
@@ -610,6 +608,7 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene* scene, Camera c
                     radiance * Math::satDot(intersec.norm, wi) / lightPdf_cheap;
             }
             break;
+            // DEBUG end
 
             /*if (lightPdf > 0) {
                 float BSDFPdf = material.pdf(intersec.norm, intersec.wo, wi);
@@ -806,7 +805,7 @@ void pathTrace(uchar4* pbo, int frame, int iter) {
             singleKernelPT<<<singlePTBlockNum, singlePTBlockSize>>>(iter, Settings::traceDepth, hstScene->devScene, cam, devImage);
         }
         else if (Settings::tracer == Tracer::ReSTIR_DI) {
-            shadeReSTIR_DI<<<singlePTBlockNum, singlePTBlockSize>>>(iter, Settings::traceDepth, hstScene->devScene, cam, devImage);
+            shadeReSTIR_DI<<<singlePTBlockNum, singlePTBlockSize>>>(iter, Settings::M_ReSTIR, hstScene->devScene, cam, devImage);
         }
         else if (Settings::tracer == Tracer::BVHVisualize) {
             BVHVisualize<<<singlePTBlockNum, singlePTBlockSize>>>(iter, hstScene->devScene, cam, devImage);
