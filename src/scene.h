@@ -423,6 +423,46 @@ struct DevScene {
         return Math::pdfAreaToSolidAngle(power * sumLightPowerInv, pos, sampled, normal);
     }
 
+    /**
+     * sampleDirectLight() with no occulsion test.
+     * 
+     * Still return pdf in solid angle measure;
+     * Still return -1 in the other 2 sample failure cases.
+     */
+    __device__ float sampleDirectLight_Cheap(glm::vec3 pos, glm::vec4 r, 
+        glm::vec3& radiance, glm::vec3& wi, glm::vec3& xi
+    ) {
+        if (lightSampler.length == 0) {
+            return InvalidPdf;
+        }
+        int lightId = lightSampler.sample(r.x, r.y);
+
+        if (lightId == lightSampler.length - 1 && envMapSampler.length != 0) {
+            return sampleEnvironmentMap(pos, glm::vec2(r.z, r.w), radiance, wi);
+        }
+        int primId = lightPrimIds[lightId];
+
+        glm::vec3 v0 = vertices[primId * 3 + 0];
+        glm::vec3 v1 = vertices[primId * 3 + 1];
+        glm::vec3 v2 = vertices[primId * 3 + 2];
+        glm::vec3 sampled = Math::sampleTriangleUniform(v0, v1, v2, r.z, r.w);
+
+        glm::vec3 normal = Math::triangleNormal(v0, v1, v2);
+        glm::vec3 posToSampled = sampled - pos;
+
+#if SCENE_LIGHT_SINGLE_SIDED
+        if (glm::dot(normal, posToSampled) > 0.f) {
+            return InvalidPdf;
+        }
+#endif
+        float area = Math::triangleArea(v0, v1, v2);
+        radiance = lightUnitRadiance[lightId];
+        wi = glm::normalize(posToSampled);
+        xi = sampled;
+        float power = Math::luminance(radiance) * (area * 2.f * glm::pi<float>());
+        return Math::pdfAreaToSolidAngle(power * sumLightPowerInv, pos, sampled, normal);
+    }
+
     glm::vec3* vertices = nullptr;
     glm::vec3* normals = nullptr;
     glm::vec2* texcoords = nullptr;

@@ -19,7 +19,8 @@ struct ToneMapping {
 
 struct Tracer {
     enum {
-        Streamed = 0, SingleKernel = 1, BVHVisualize = 2, GBufferPreview = 3
+        Streamed = 0, SingleKernel = 1, BVHVisualize = 2, GBufferPreview = 3,
+        ReSTIR_DI = 4
     };
 };
 

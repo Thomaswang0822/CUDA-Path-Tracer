@@ -1,7 +1,7 @@
 #pragma once
 
-#include "utilities.h"
-#include "sampler.h"
+#include "mathUtil.h"
+#include <cuda_runtime.h>
 
 namespace ReSTIR {
 	/**
@@ -10,16 +10,14 @@ namespace ReSTIR {
 	 */
 	struct SampledLight {
 		/** Data */
-		int lightId = -1;
-		int primId = -1;
+		glm::vec3 dir = glm::vec3(0.f, 1.f, 0.f);  // shading-point dependent
 		glm::vec3 position = glm::vec3(0.f);
-		glm::vec3 normal = glm::vec3(0.f, 1.f, 0.f);
+		glm::vec3 radiance = glm::vec3(0.f);
 
 		__device__ void operator = (const SampledLight& rhs) {
-			lightId = rhs.lightId;
-			primId = rhs.primId;
+			dir = rhs.dir;
 			position = rhs.position;
-			normal = rhs.normal;
+			radiance = rhs.radiance;
 		}
 	};
 
@@ -27,11 +25,16 @@ namespace ReSTIR {
 	 * Reservoir that consists of N=1 sample.
 	 */
 	struct Reservoir {
-		SampledLight y;  // output sample, a position
+		SampledLight y;  // output sample
 		float w_sum = 0.f;  // sum of weights
 		uint32_t M = 0;  // number of samples seen so far
 		float W = 0.f;  // see Eq. 6 in DI paper
 
+		/**
+		 * ReSTIR DI paper Algorithm 2.
+		 * 
+		 * @param w_i: Proposal weight
+		 */
 		__device__ void update(SampledLight x_i, float w_i, float rand) {
 			w_sum += w_i;
 			M++;
@@ -40,4 +43,20 @@ namespace ReSTIR {
 			}
 		}
 	};
+
+
+	/**
+	 * Calculate the weight = p^/p,
+	 * 0 if p is a bad value (failed sample), checked outside.
+	 */
+	__device__ inline static float scalarWeight(glm::vec3 p_hat, float p) {
+		return Math::luminance(p_hat / p);
+	}
+
+	/**
+	 * Turn the high-dim distribution into a float distribution.
+	 */
+	__device__ inline static float toScalar(glm::vec3 p) {
+		return Math::luminance(p);
+	}
 }

@@ -225,7 +225,7 @@ void RenderImGui() {
 	}
 
 	ImGui::Begin("Options"); {
-		const char* Tracers[] = { "Streamed", "Single Kernel", "BVH Visualize", "GBuffer Preview" };
+		const char* Tracers[] = { "Streamed", "Single Kernel", "BVH Visualize", "GBuffer Preview", "ReSTIR_DI"};
 		if (ImGui::Combo("Tracer", &Settings::tracer, Tracers, IM_ARRAYSIZE(Tracers))) {
 			State::camChanged = true;
 		}
