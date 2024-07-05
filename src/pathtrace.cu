@@ -592,6 +592,7 @@ __global__ void shadeReSTIR_DI(
         glm::vec3 radiance(0.f);  // Li
         glm::vec3 wi;        // sampled direction
         glm::vec3 xi;        // wi turned into position (for occlucsion test)
+        sampledInfo.invalidate();
         // generate wi
         material.sample(intersec.norm, intersec.wo, sample3D(rng), sampledInfo);
         wi = sampledInfo.dir; pBSDF = sampledInfo.pdf;
@@ -635,6 +636,13 @@ __global__ void shadeReSTIR_DI(
         Math::satDot(intersec.norm, wi) *
         static_cast<float>(!scene->testOcclusion(intersec.pos, xi));
     accRadiance = f_q * r.W;
+
+    //accRadiance = wi;  // green => up, light direction
+    //accRadiance = xi;  // non-0
+    //accRadiance = f_q;  // 0
+    //accRadiance = glm::vec3(r.W);  // 0
+
+    //accRadiance = glm::vec3(r.w_sum);  // 0 => every w_proposal is 0
     
 #pragma endregion
 

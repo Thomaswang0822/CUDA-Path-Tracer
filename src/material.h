@@ -27,8 +27,16 @@ enum BSDFSampleType {
 struct BSDFSample {
     glm::vec3 dir;
     glm::vec3 bsdf;
-    float pdf;
-    uint32_t type;
+    float pdf = InvalidPdf;
+    uint32_t type = BSDFSampleType::Invalid;
+
+    /**
+     * Set pdf and type to invalid flag in order to safely reuse.
+     */
+    __host__ __device__ void invalidate() {
+        pdf = InvalidPdf;
+        type = BSDFSampleType::Invalid;
+    }
 };
 
 #pragma region material util
@@ -160,7 +168,7 @@ struct Material {
         else {
             bool result = Math::refract(n, wo, ior, sample.dir);
             if (!result) {
-                sample.type = Invalid;
+                sample.invalidate();
                 return;
             }
             // KILLING BUG: should never modify Material field.
@@ -193,8 +201,8 @@ struct Material {
     __device__ float metallicWorkflowPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) const {
         glm::vec3 h = glm::normalize(wo + wi);
         return glm::mix(
-            Math::satDot(n, wi) * PiInv,
-            GTR2Pdf(n, h, wo, roughness * roughness) / (4.f * Math::absDot(h, wo)),
+            Math::satDot(n, wi) * PiInv,  // diffuse behavior
+            GTR2Pdf(n, h, wo, roughness * roughness) / (4.f * Math::absDot(h, wo)),  // metalic behavior
             1.f / (2.f - metallic)
         );
     }
@@ -211,7 +219,8 @@ struct Material {
         }
 
         if (glm::dot(n, sample.dir) < 0.f) {
-            sample.type = Invalid;
+            //sample.type = Invalid;
+            sample.invalidate();
         }
         else {
             sample.bsdf = metallicWorkflowBSDF(n, wo, sample.dir);

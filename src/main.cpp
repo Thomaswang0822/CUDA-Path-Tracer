@@ -266,9 +266,11 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 			break;
 		case GLFW_KEY_LEFT_SHIFT:
 			cam.position += glm::vec3(0.f, -.1f, 0.f);
+			State::camChanged = true;
 			break;
 		case GLFW_KEY_SPACE:
 			cam.position += glm::vec3(0.f, .1f, 0.f);
+			State::camChanged = true;
 			break;
 		case GLFW_KEY_R:
 			State::camChanged = true;
