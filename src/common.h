@@ -30,9 +30,13 @@ struct Settings {
     static int tracer;
     static bool sortMaterial;
     static int GBufferPreviewOpt;
-    static int M_ReSTIR;
 };
 
 struct State {
     static bool camChanged;
+};
+
+struct ReSTIRSettings {
+    static int M_Light;
+    static int M_BSDF;
 };

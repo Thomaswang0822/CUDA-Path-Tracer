@@ -205,7 +205,7 @@ void saveImage() {
 	std::ostringstream ss;
 	ss << filename << "." << startTimeString << "." << samples << "samp";
 	if (Settings::tracer == Tracer::ReSTIR_DI) {
-		ss << Settings::M_ReSTIR << "M";
+		ss << ReSTIRSettings::M_Light << "M";
 	}
 	filename = ss.str();
 

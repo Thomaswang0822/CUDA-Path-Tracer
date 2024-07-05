@@ -447,7 +447,13 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
     }
 }
 
-__global__ void shadeReSTIR_DI(int iter, int M, DevScene* scene, Camera cam, glm::vec3* image) {
+__global__ void shadeReSTIR_DI(
+    int iter, 
+    int M_Light, int M_BSDF,
+    DevScene* scene, 
+    const Camera cam, 
+    glm::vec3* image
+) {
     int x = blockDim.x * blockIdx.x + threadIdx.x;
     int y = blockDim.y * blockIdx.y + threadIdx.y;
     if (x >= cam.resolution.x || y >= cam.resolution.y) {
@@ -480,28 +486,30 @@ __global__ void shadeReSTIR_DI(int iter, int M, DevScene* scene, Camera cam, glm
         }
         goto WriteRadiance;
     }
-#pragma region version1
-    /**
-     * DI version 1: only sample light.
-     * 
-     * p^ is full f without visibility = brdf * Le * <wi, normal>
-     * p  is proportional to Le; let p = Le
-     * 
-     * @note Everything in solid angle measure (not the same as DI paper)
-     */
+
     bool deltaBSDF = (material.type == Material::Type::Dielectric);
 
     if (material.type != Material::Type::Dielectric && glm::dot(intersec.norm, intersec.wo) < 0.f) {
         intersec.norm = -intersec.norm;
     }
 
+#pragma region version1
+    /**
+     * DI version 1: only sample light.
+     *
+     * p^ is full f without visibility = brdf * Le * <wi, normal>
+     * p  is proportional to Le; let p = Le
+     *
+     * @note Everything in solid angle measure (not the same as DI paper)
+     */
+    /*
     if (!deltaBSDF) {
         ReSTIR::Reservoir r;
-        glm::vec3 p_hat;     // Li * BSDF * cos * Visibility
+        glm::vec3 p_hat;     // Li * BSDF * cos
         float p;             // "cheap" pdf
         float w_proposal;    // p^/p
 
-        for (int i = 0; i < M; i++) {
+        for (int i = 0; i < M_Light; i++) {
             glm::vec3 radiance;  // Li
             glm::vec3 wi;        // sampled direction
             glm::vec3 xi;        // wi turned into position (for occlucsion test)
@@ -513,7 +521,7 @@ __global__ void shadeReSTIR_DI(int iter, int M, DevScene* scene, Camera cam, glm
             }
             else {
                 p_hat = radiance * material.BSDF(intersec.norm, intersec.wo, wi) * Math::satDot(intersec.norm, wi);
-                w_proposal = ReSTIR::toScalar(p_hat) / (p * M);  // Note Eq 3.2
+                w_proposal = ReSTIR::toScalar(p_hat) / (p * M_Light);  // Note Eq 3.2
             }
 
             // Update reservoir even if sampling failed, otherwise biased.
@@ -538,7 +546,84 @@ __global__ void shadeReSTIR_DI(int iter, int M, DevScene* scene, Camera cam, glm
         accRadiance = f_q * r.W;
     }
     // don't consider difficult Dielectric
+    */
+#pragma endregion
 
+#pragma region version2
+    /**
+     * DI version 2: combine light sampling and BSDF sampling with MIS.
+     */
+    ReSTIR::Reservoir r;
+    glm::vec3 p_hat;     // Li * BSDF * cos
+    float pLight, pBSDF; // "cheap" pdf, light or BSDF
+    float w_proposal;    // p^ * mi * W_xi, where W_xi is just 1/p, and
+    float mi;            // mi is MIS weight = p_{1/2} / (M1 * p_1 + M2 * p_2)
+
+    // Light Sampling for non-dielectric
+    if (!deltaBSDF) {
+        for (int i = 0; i < M_Light; i++) {
+            glm::vec3 radiance;  // Li
+            glm::vec3 wi;        // sampled direction
+            glm::vec3 xi;        // wi turned into position (for occlucsion test)
+            // generate wi
+            pLight = scene->sampleDirectLight_Cheap(intersec.pos, sample4D(rng), radiance, wi, xi);
+            if (isnan(pLight) || isinf(pLight) || pLight < 0.f) {
+                // a invalid sample, thus weight = 0.
+                w_proposal = 0.f;
+            }
+            else {
+                p_hat = radiance * material.BSDF(intersec.norm, intersec.wo, wi) * Math::satDot(intersec.norm, wi);
+                pBSDF = material.pdf(intersec.norm, intersec.wo, wi);
+                mi = ReSTIR::MIS_BalanceWeight(pLight, pBSDF, M_Light, M_BSDF);
+                w_proposal = ReSTIR::toScalar(p_hat) * mi / pLight;
+            }
+
+            // Update reservoir even if sampling failed, otherwise biased.
+            // See Course Notes p10-11
+            r.update({ wi, xi, radiance }, w_proposal, sample1D(rng));
+        }
+    }
+    // BSDF sampling
+    BSDFSample sampledInfo;
+    for (int i = 0; i < M_BSDF; i++) {
+        glm::vec3 radiance;  // Li
+        glm::vec3 wi;        // sampled direction
+        glm::vec3 xi;        // wi turned into position (for occlucsion test)
+        // generate wi
+        material.sample(intersec.norm, intersec.wo, sample3D(rng), sampledInfo);
+        wi = sampledInfo.dir; pBSDF = sampledInfo.pdf;
+        if (isnan(pBSDF) || isinf(pBSDF) || pBSDF < 0.f) {
+            // a invalid sample, thus weight = 0.
+            w_proposal = 0.f;
+        }
+        else {            
+            p_hat = radiance * material.BSDF(intersec.norm, intersec.wo, wi) * Math::satDot(intersec.norm, wi);
+            // Heavy-lifting to find pLight counterpart; moved to a member function of DevScene
+            pLight = scene->lightPdf(intersec.pos, wi, radiance);
+            mi = ReSTIR::MIS_BalanceWeight(pBSDF, pLight, M_BSDF, M_Light);
+            w_proposal = ReSTIR::toScalar(p_hat) * mi / pBSDF;
+        }
+
+        // Update reservoir even if sampling failed, otherwise biased.
+        // See Course Notes p10-11
+        r.update({ wi, xi, radiance }, w_proposal, sample1D(rng));
+    }
+
+    // Algorithm 3 line 8; reuse some variables
+    glm::vec3 wi = r.y.dir;
+    glm::vec3 xi = r.y.position;
+    p_hat = r.y.radiance *
+        material.BSDF(intersec.norm, intersec.wo, wi) *
+        Math::satDot(intersec.norm, wi);
+    float p_hat_q = ReSTIR::toScalar(p_hat);
+    r.W = r.w_sum / p_hat_q;  // Note Eq 3.2
+
+    // Algorithm 3 line 11
+    glm::vec3 f_q = r.y.radiance *
+        material.BSDF(intersec.norm, intersec.wo, wi) *
+        Math::satDot(intersec.norm, wi) *
+        static_cast<float>(!scene->testOcclusion(intersec.pos, xi));
+    accRadiance = f_q * r.W;
 #pragma endregion
 
 WriteRadiance:
@@ -805,7 +890,9 @@ void pathTrace(uchar4* pbo, int frame, int iter) {
             singleKernelPT<<<singlePTBlockNum, singlePTBlockSize>>>(iter, Settings::traceDepth, hstScene->devScene, cam, devImage);
         }
         else if (Settings::tracer == Tracer::ReSTIR_DI) {
-            shadeReSTIR_DI<<<singlePTBlockNum, singlePTBlockSize>>>(iter, Settings::M_ReSTIR, hstScene->devScene, cam, devImage);
+            shadeReSTIR_DI<<<singlePTBlockNum, singlePTBlockSize>>>(iter, 
+                ReSTIRSettings::M_Light, ReSTIRSettings::M_BSDF,
+                hstScene->devScene, cam, devImage);
         }
         else if (Settings::tracer == Tracer::BVHVisualize) {
             BVHVisualize<<<singlePTBlockNum, singlePTBlockSize>>>(iter, hstScene->devScene, cam, devImage);

@@ -59,4 +59,15 @@ namespace ReSTIR {
 	__device__ inline static float toScalar(glm::vec3 p) {
 		return Math::luminance(p);
 	}
+
+	/**
+	 * MIS weight of using sample strategy A.
+	 * 
+	 * @param pA: Distribution of A, which is the sampling used
+	 * @param pB: Distribution of B, the "counterpart"
+	 * @param MA, MB: Numbers of samples for each.
+	 */
+	__device__ inline static float MIS_BalanceWeight(float pA, float pB, int MA, int MB) {
+		return pA / (MA * pA + MB * pB);
+	}
 }
