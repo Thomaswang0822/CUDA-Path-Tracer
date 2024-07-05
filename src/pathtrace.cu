@@ -478,6 +478,7 @@ __global__ void shadeReSTIR_DI(
     }
 
     Material material = scene->getTexturedMaterialAndSurface(intersec);
+    intersec.wo = -ray.direction;  // another killing bug
 
     // same for camera ray hitting a light
     if (material.type == Material::Type::Light) {
