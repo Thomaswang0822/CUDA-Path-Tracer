@@ -281,7 +281,7 @@ __global__ void computeIntersections(
     }
 
     Intersection intersec;
-    PathSegment& segment = pathSegments[pathIdx];
+    const PathSegment& segment = pathSegments[pathIdx];
 #if ENABLE_GBUFFER
     if (depth == 0) {
         intersections[pathIdx] = GBuffer[pathIdx];
@@ -553,6 +553,8 @@ __global__ void shadeReSTIR_DI(
     /**
      * DI version 2: combine light sampling and BSDF sampling with MIS.
      */
+
+    
     ReSTIR::Reservoir r;
     glm::vec3 p_hat;     // Li * BSDF * cos
     float pLight, pBSDF; // "cheap" pdf, light or BSDF
@@ -586,20 +588,28 @@ __global__ void shadeReSTIR_DI(
     // BSDF sampling
     BSDFSample sampledInfo;
     for (int i = 0; i < M_BSDF; i++) {
-        glm::vec3 radiance;  // Li
+        glm::vec3 radiance(0.f);  // Li
         glm::vec3 wi;        // sampled direction
         glm::vec3 xi;        // wi turned into position (for occlucsion test)
         // generate wi
         material.sample(intersec.norm, intersec.wo, sample3D(rng), sampledInfo);
         wi = sampledInfo.dir; pBSDF = sampledInfo.pdf;
+        /// xi is only used for testOcclusion() for the only survived sample y;
+        /// If Ray(intersec.pos, wi) failed to hit a light, then
+        /// radiance (updated by lightPdf) thus p_hat thus w_proposal = 0 => 
+        /// sampled_i is garabage and we don't care;
+        /// If the Ray does hit a light, we want to "skip" the intersection test,
+        /// by making xi really close to shading point.
+        xi = intersec.pos + 1e-6f * wi;
         if (isnan(pBSDF) || isinf(pBSDF) || pBSDF < 0.f) {
             // a invalid sample, thus weight = 0.
             w_proposal = 0.f;
         }
         else {            
-            p_hat = radiance * material.BSDF(intersec.norm, intersec.wo, wi) * Math::satDot(intersec.norm, wi);
             // Heavy-lifting to find pLight counterpart; moved to a member function of DevScene
             pLight = scene->lightPdf(intersec.pos, wi, radiance);
+            // Should know radiance before computing p_hat
+            p_hat = radiance * material.BSDF(intersec.norm, intersec.wo, wi) * Math::satDot(intersec.norm, wi);
             mi = ReSTIR::MIS_BalanceWeight(pBSDF, pLight, M_BSDF, M_Light);
             w_proposal = ReSTIR::toScalar(p_hat) * mi / pBSDF;
         }
@@ -624,6 +634,7 @@ __global__ void shadeReSTIR_DI(
         Math::satDot(intersec.norm, wi) *
         static_cast<float>(!scene->testOcclusion(intersec.pos, xi));
     accRadiance = f_q * r.W;
+    
 #pragma endregion
 
 WriteRadiance:
@@ -681,10 +692,10 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene* scene, Camera c
         if (!deltaBSDF) {
             glm::vec3 radiance;
             glm::vec3 wi;
-            //float lightPdf = scene->sampleDirectLight(intersec.pos, sample4D(rng), radiance, wi);
+            float lightPdf = scene->sampleDirectLight(intersec.pos, sample4D(rng), radiance, wi);
 
             // DEBUG
-            glm::vec3 xi;
+            /*glm::vec3 xi;
             float lightPdf_cheap = scene->sampleDirectLight_Cheap(intersec.pos, sample4D(rng), radiance, wi, xi);
             bool vis = !scene->testOcclusion(intersec.pos, xi);
             if (lightPdf_cheap > 0 && vis) {
@@ -692,14 +703,14 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene* scene, Camera c
                     static_cast<float>(vis) *
                     radiance * Math::satDot(intersec.norm, wi) / lightPdf_cheap;
             }
-            break;
+            break;*/
             // DEBUG end
 
-            /*if (lightPdf > 0) {
+            if (lightPdf > 0) {
                 float BSDFPdf = material.pdf(intersec.norm, intersec.wo, wi);
                 accRadiance += throughput * material.BSDF(intersec.norm, intersec.wo, wi) *
                     radiance * Math::satDot(intersec.norm, wi) / lightPdf * Math::powerHeuristic(lightPdf, BSDFPdf);
-            }*/
+            }
         }
 
         // BSDF sampling

@@ -433,6 +433,29 @@ struct DevScene {
     }
 
     /**
+     * sampleEnvironmentMap() with no occulsion test.
+     *
+     * Still return pdf in solid angle measure;
+     * Still return -1 in the other 2 sample failure cases.
+     * Additionally, sampled position are stored in xi.
+     */
+    __device__ float sampleEnvMap_Cheap(glm::vec3 pos, glm::vec2 r, 
+        glm::vec3& radiance, glm::vec3& wi, glm::vec3& xi
+    ) {
+        int pixId = envMapSampler.sample(r.x, r.y);
+
+        int y = pixId / envMap->width;
+        int x = pixId - y * envMap->width;
+
+        radiance = envMap->devData[pixId];
+        wi = Math::toSphere(glm::vec2((.5f + x) / envMap->width, (.5f + y) / envMap->height));
+        xi = pos + 1e6f * wi;
+
+        return Math::luminance(radiance) * sumLightPowerInv *
+            envMap->width * envMap->height * PiInv * PiInv * .5f;
+    }
+
+    /**
     * Returns solid angle probability
     */
     __device__ float sampleDirectLight(glm::vec3 pos, glm::vec4 r, glm::vec3& radiance, glm::vec3& wi) {
@@ -479,6 +502,7 @@ struct DevScene {
      * 
      * Still return pdf in solid angle measure;
      * Still return -1 in the other 2 sample failure cases.
+     * Additionally, sampled position are stored in xi.
      */
     __device__ float sampleDirectLight_Cheap(glm::vec3 pos, glm::vec4 r, 
         glm::vec3& radiance, glm::vec3& wi, glm::vec3& xi
@@ -489,7 +513,7 @@ struct DevScene {
         int lightId = lightSampler.sample(r.x, r.y);
 
         if (lightId == lightSampler.length - 1 && envMapSampler.length != 0) {
-            return sampleEnvironmentMap(pos, glm::vec2(r.z, r.w), radiance, wi);
+            return sampleEnvMap_Cheap(pos, glm::vec2(r.z, r.w), radiance, wi, xi);
         }
         int primId = lightPrimIds[lightId];
 

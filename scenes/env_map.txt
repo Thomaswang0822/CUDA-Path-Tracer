@@ -95,7 +95,7 @@ NormalMap	texture/sci-fi-panel1-normal.png
 
 Material 	Textured2
 Type		MetallicWorkflow
-BaseColor	texture/pixel.png
+BaseColor	texture/fleshy_granite1_albedo.png
 Metallic	0.1
 Roughness	0.1
 Ior		0
@@ -116,7 +116,7 @@ Rotate	0 0 0
 Scale		1 1 1
 
 Object 	Teapot
-model/teapot.obj
+model/teapot_ori.obj
 Material	Glass
 Translate	2 0 -2
 Rotate	45 45 0
