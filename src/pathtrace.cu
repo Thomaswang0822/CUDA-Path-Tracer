@@ -479,6 +479,9 @@ __global__ void shadeReSTIR_DI(
 
     Material material = scene->getTexturedMaterialAndSurface(intersec);
     intersec.wo = -ray.direction;  // another killing bug
+    ////DEBUG
+    //accRadiance = material.baseColor;
+    //goto WriteRadiance;
 
     // same for camera ray hitting a light
     if (material.type == Material::Type::Light) {
@@ -527,22 +530,18 @@ __global__ void shadeReSTIR_DI(
 
             // Update reservoir even if sampling failed, otherwise biased.
             // See Course Notes p10-11
-            r.update({ wi, xi, radiance }, w_proposal, sample1D(rng));
+            r.update({ wi, xi, p_hat }, w_proposal, sample1D(rng));
         }
 
         // Algorithm 3 line 8; reuse some variables
         glm::vec3 wi = r.y.dir;
         glm::vec3 xi = r.y.position;
-        p_hat = r.y.radiance *
-            material.BSDF(intersec.norm, intersec.wo, wi) *
-            Math::satDot(intersec.norm, wi);
+        p_hat = r.y.targetFunc;
         float p_hat_q = ReSTIR::toScalar(p_hat);
         r.W = r.w_sum / p_hat_q;  // Note Eq 3.2
         
         // Algorithm 3 line 11
-        glm::vec3 f_q = r.y.radiance *
-            material.BSDF(intersec.norm, intersec.wo, wi) *
-            Math::satDot(intersec.norm, wi) *
+        glm::vec3 f_q = r.y.targetFunc *
             static_cast<float>(!scene->testOcclusion(intersec.pos, xi));
         accRadiance = f_q * r.W;
     }
@@ -583,7 +582,7 @@ __global__ void shadeReSTIR_DI(
 
             // Update reservoir even if sampling failed, otherwise biased.
             // See Course Notes p10-11
-            r.update({ wi, xi, radiance }, w_proposal, sample1D(rng));
+            r.update({ wi, xi, p_hat }, w_proposal, sample1D(rng));
         }
     }
     // BSDF sampling
@@ -611,36 +610,28 @@ __global__ void shadeReSTIR_DI(
             // Heavy-lifting to find pLight counterpart; moved to a member function of DevScene
             pLight = scene->lightPdf(intersec.pos, wi, radiance);
             // Should know radiance before computing p_hat
-            p_hat = radiance * material.BSDF(intersec.norm, intersec.wo, wi) * Math::satDot(intersec.norm, wi);
+            // Tricky bug: shouldn't recompute BSDF (will be 0 for dielectric).
+            p_hat = radiance * sampledInfo.bsdf * Math::satDot(intersec.norm, wi);
             mi = ReSTIR::MIS_BalanceWeight(pBSDF, pLight, M_BSDF, M_Light);
             w_proposal = ReSTIR::toScalar(p_hat) * mi / pBSDF;
         }
 
         // Update reservoir even if sampling failed, otherwise biased.
         // See Course Notes p10-11
-        r.update({ wi, xi, radiance }, w_proposal, sample1D(rng));
+        r.update({ wi, xi, p_hat }, w_proposal, sample1D(rng));
     }
 
     // Algorithm 3 line 8; reuse some variables
     glm::vec3 wi = r.y.dir;
     glm::vec3 xi = r.y.position;
-    p_hat = r.y.radiance *
-        material.BSDF(intersec.norm, intersec.wo, wi) *
-        Math::satDot(intersec.norm, wi);
+    p_hat = r.y.targetFunc;
     float p_hat_q = ReSTIR::toScalar(p_hat);
     r.W = r.w_sum / p_hat_q;  // Note Eq 3.2
 
     // Algorithm 3 line 11
-    glm::vec3 f_q = r.y.radiance *
-        material.BSDF(intersec.norm, intersec.wo, wi) *
-        Math::satDot(intersec.norm, wi) *
+    glm::vec3 f_q = r.y.targetFunc *
         static_cast<float>(!scene->testOcclusion(intersec.pos, xi));
     accRadiance = f_q * r.W;
-
-    //accRadiance = wi;  // green => up, light direction
-    //accRadiance = xi;  // non-0
-    //accRadiance = f_q;  // 0
-    //accRadiance = glm::vec3(r.W);  // 0
 
     //accRadiance = glm::vec3(r.w_sum);  // 0 => every w_proposal is 0
     

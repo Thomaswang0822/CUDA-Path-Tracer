@@ -12,12 +12,12 @@ namespace ReSTIR {
 		/** Data */
 		glm::vec3 dir = glm::vec3(0.f, 1.f, 0.f);  // shading-point dependent
 		glm::vec3 position = glm::vec3(0.f);
-		glm::vec3 radiance = glm::vec3(0.f);
+		glm::vec3 targetFunc = glm::vec3(0.f);  // p_hat = Le * bsdf * cosTerm
 
 		__device__ void operator = (const SampledLight& rhs) {
 			dir = rhs.dir;
 			position = rhs.position;
-			radiance = rhs.radiance;
+			targetFunc = rhs.targetFunc;
 		}
 	};
 
