@@ -479,9 +479,6 @@ __global__ void shadeReSTIR_DI(
 
     Material material = scene->getTexturedMaterialAndSurface(intersec);
     intersec.wo = -ray.direction;  // another killing bug
-    ////DEBUG
-    //accRadiance = material.baseColor;
-    //goto WriteRadiance;
 
     // same for camera ray hitting a light
     if (material.type == Material::Type::Light) {
@@ -564,7 +561,7 @@ __global__ void shadeReSTIR_DI(
     // Light Sampling for non-dielectric
     if (!deltaBSDF) {
         for (int i = 0; i < M_Light; i++) {
-            glm::vec3 radiance;  // Li
+            glm::vec3 radiance(0.f);  // Li
             glm::vec3 wi;        // sampled direction
             glm::vec3 xi;        // wi turned into position (for occlucsion test)
             // generate wi
@@ -587,6 +584,7 @@ __global__ void shadeReSTIR_DI(
     }
     // BSDF sampling
     BSDFSample sampledInfo;
+    bool deltaSample;
     for (int i = 0; i < M_BSDF; i++) {
         glm::vec3 radiance(0.f);  // Li
         glm::vec3 wi;        // sampled direction
@@ -595,6 +593,7 @@ __global__ void shadeReSTIR_DI(
         // generate wi
         material.sample(intersec.norm, intersec.wo, sample3D(rng), sampledInfo);
         wi = sampledInfo.dir; pBSDF = sampledInfo.pdf;
+        deltaSample = (sampledInfo.type & BSDFSampleType::Specular);
         /// xi is only used for testOcclusion() for the only survived sample y;
         /// If Ray(intersec.pos, wi) failed to hit a light, then
         /// radiance (updated by lightPdf) thus p_hat thus w_proposal = 0 => 
@@ -611,7 +610,10 @@ __global__ void shadeReSTIR_DI(
             pLight = scene->lightPdf(intersec.pos, wi, radiance);
             // Should know radiance before computing p_hat
             // Tricky bug: shouldn't recompute BSDF (will be 0 for dielectric).
-            p_hat = radiance * sampledInfo.bsdf * Math::satDot(intersec.norm, wi);
+            // Careless bug: should stop MIS for dielectric.
+            p_hat = radiance * sampledInfo.bsdf *
+                (deltaSample ? 1.f : Math::satDot(intersec.norm, wi));
+            pLight = deltaSample ? 0.f : pLight;
             mi = ReSTIR::MIS_BalanceWeight(pBSDF, pLight, M_BSDF, M_Light);
             w_proposal = ReSTIR::toScalar(p_hat) * mi / pBSDF;
         }
@@ -694,22 +696,10 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene* scene, Camera c
             glm::vec3 wi;
             float lightPdf = scene->sampleDirectLight(intersec.pos, sample4D(rng), radiance, wi);
 
-            // DEBUG
-            /*glm::vec3 xi;
-            float lightPdf_cheap = scene->sampleDirectLight_Cheap(intersec.pos, sample4D(rng), radiance, wi, xi);
-            bool vis = !scene->testOcclusion(intersec.pos, xi);
-            if (lightPdf_cheap > 0 && vis) {
-                accRadiance += throughput * material.BSDF(intersec.norm, intersec.wo, wi) *
-                    static_cast<float>(vis) *
-                    radiance * Math::satDot(intersec.norm, wi) / lightPdf_cheap;
-            }
-            break;*/
-            // DEBUG end
-
             if (lightPdf > 0) {
                 float BSDFPdf = material.pdf(intersec.norm, intersec.wo, wi);
                 accRadiance += throughput * material.BSDF(intersec.norm, intersec.wo, wi) *
-                    radiance * Math::satDot(intersec.norm, wi) / lightPdf * Math::powerHeuristic(lightPdf, BSDFPdf);
+                    radiance * Math::satDot(intersec.norm, wi) / lightPdf * Math::balanceHeuristic(lightPdf, BSDFPdf);
             }
         }
 
