@@ -4,7 +4,7 @@ FovY        22
 LensRadius	0.1
 FocalDist	11
 ApertureMask	Null
-Sample		4
+Sample		5000
 Depth		1
 File        Cornell
 Eye         0 0 10
@@ -38,6 +38,14 @@ NormalMap	Null
 Material Green
 Type		Lambertian
 BaseColor	.25 .85 .25
+Metallic	0
+Roughness	1
+Ior			0
+NormalMap	Null
+
+Material Blue
+Type		Lambertian
+BaseColor	.25 .25 .85
 Metallic	0
 Roughness	1
 Ior			0
@@ -113,7 +121,7 @@ Scale		4 3 3
 
 Object Floor
 model/square.obj
-Material 	White
+Material 	Blue
 Translate	0 -3 0
 Rotate	0 0 0
 Scale		4 3 3
@@ -127,21 +135,21 @@ Scale		4 3 3
 
 Object Bunny
 model/bunny.obj
-Material 	White
+Material 	Plastic
 Translate	0.5 -2 0
 Rotate	0 0 0
 Scale		1 1 1
 
 Object Teapot
 model/teapot_ori.obj
-Material	Red
+Material	Glass
 Translate	2 0 -2
 Rotate	45 45 0
 Scale		.3 .3 .3
 
 Object Cube
 model/cube.obj
-Material	Green
+Material	AlienMetal
 Translate	-2 1 -1
 Rotate	0 45 10
 Scale		1.1 1.1 1.1

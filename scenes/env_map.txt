@@ -5,8 +5,8 @@ LensRadius	0
 FocalDist	11
 ApertureMask	Null
 Sample		5000
-Depth		8
-File        Cornell
+Depth		1
+File        EnvMap
 Eye         0 0 10
 Rotation      -90 0 0
 Up          0 1 0
@@ -48,6 +48,14 @@ NormalMap	Null
 Material 	Green
 Type		Lambertian
 BaseColor	.25 .85 .25
+Metallic	0
+Roughness	1
+Ior			0
+NormalMap	Null
+
+Material Blue
+Type		Lambertian
+BaseColor	.25 .25 .85
 Metallic	0
 Roughness	1
 Ior			0

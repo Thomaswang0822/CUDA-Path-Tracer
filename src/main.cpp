@@ -178,14 +178,19 @@ int main(int argc, char** argv) {
 }
 
 void saveImage() {
-	float samples = iteration;
+#if AVERAGE_SPP
+	float spp = iteration;
+#else
+	float spp = 1.0f;
+#endif // AVERAGE_SPP
+	
 	// output image file
 	Image img(width, height);
 
 	for (int x = 0; x < width; x++) {
 		for (int y = 0; y < height; y++) {
 			int index = x + (y * width);
-			glm::vec3 color = renderState->image[index] / samples;
+			glm::vec3 color = renderState->image[index] / spp;
 			switch (Settings::toneMapping) {
 			case ToneMapping::Filmic:
 				color = Math::filmic(color);
@@ -203,9 +208,9 @@ void saveImage() {
 
 	std::string filename = renderState->imageName;
 	std::ostringstream ss;
-	ss << filename << "." << startTimeString << "." << samples << "samp";
+	ss << filename << "." << startTimeString << "." << spp << "spp";
 	if (Settings::tracer == Tracer::ReSTIR_DI) {
-		ss << ReSTIRSettings::M_Light << "M";
+		ss << ReSTIRSettings::M_Light << "Ml" << ReSTIRSettings::M_BSDF << "Mb";
 	}
 	filename = ss.str();
 

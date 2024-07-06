@@ -26,11 +26,17 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution,
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
 
+#if AVERAGE_SPP
+    float spp = static_cast<float>(iter);
+#else
+    float spp = 1.0f;
+#endif // AVERAGE_SPP
+
     if (x < resolution.x && y < resolution.y) {
         int index = x + (y * resolution.x);
 
         // Tonemapping and gamma correction
-        glm::vec3 color = Image[index] / float(iter);
+        glm::vec3 color = Image[index] / spp;
 
         switch (toneMapping) {
         case ToneMapping::Filmic:
@@ -644,7 +650,11 @@ WriteRadiance:
         isinf(accRadiance.x) || isinf(accRadiance.y) || isinf(accRadiance.z)) {
         return;
     }
+#if AVERAGE_SPP
     image[index] += accRadiance;
+#else
+    image[index] = accRadiance;
+#endif // AVERAGE_SPP
 }
 
 __global__ void singleKernelPT(int iter, int maxDepth, DevScene* scene, Camera cam, glm::vec3* image) {
@@ -767,7 +777,11 @@ WriteRadiance:
         isinf(accRadiance.x) || isinf(accRadiance.y) || isinf(accRadiance.z)) {
         return;
     }
+#if AVERAGE_SPP
     image[index] += accRadiance;
+#else
+    image[index] = accRadiance;
+#endif // AVERAGE_SPP
 }
 
 __global__ void BVHVisualize(int iter, DevScene* scene, Camera cam, glm::vec3* image) {

@@ -2,14 +2,11 @@
 #include <iostream>
 
 #define SAMPLER_USE_SOBOL false
-
 #define SCENE_LIGHT_SINGLE_SIDED true
-
 #define BVH_DISABLE false
-
 #define ENABLE_GBUFFER false
-
 #define CAMERA_PANORAMA false
+#define AVERAGE_SPP true
 
 struct ToneMapping {
     enum {
