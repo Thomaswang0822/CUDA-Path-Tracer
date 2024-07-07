@@ -1,6 +1,5 @@
 #include <cuda_runtime.h>
 #include <cmath>
-#include <thrust/device_ptr.h>
 
 #include "sceneStructs.h"
 #include "material.h"
@@ -51,17 +50,8 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution,
     }
 }
 
-#define PixelIdxForTerminated -1
-
 static Scene* hstScene = nullptr;
 static glm::vec3* devImage = nullptr;
-
-// TODO: static variables for device memory, any extra info you need, etc
-// ...
-static thrust::device_ptr<PathSegment> devPathsThr;
-static thrust::device_ptr<PathSegment> devTerminatedPathsThr;
-
-static thrust::device_ptr<Intersection> devIntersectionsThr;
 
 #if ENABLE_GBUFFER
 static Intersection* devGBuffer = nullptr;
@@ -113,8 +103,7 @@ void pathTraceInit(Scene* scene) {
     const Camera& cam = hstScene->camera;
     const int pixelcount = cam.resolution.x * cam.resolution.y;
 
-    cudaMalloc(&devImage, pixelcount * sizeof(glm::vec3));
-    cudaMemset(devImage, 0, pixelcount * sizeof(glm::vec3));
+    devImage = CUDA::safeMalloc<glm::vec3>(pixelcount);
 
     checkCUDAError("pathTraceInit");
 
@@ -133,51 +122,10 @@ void pathTraceInit(Scene* scene) {
 }
 
 void pathTraceFree() {
-    cudaSafeFree(devImage);  // no-op if devImage is null
+    CUDA::safeFree(devImage);  // no-op if devImage is null
 #if ENABLE_GBUFFER
-    cudaSafeFree(devGBuffer);
+    CUDA::safeFree(devGBuffer);
 #endif
-}
-
-/**
- * Antialiasing and physically based camera (lens effect)
- */
-__device__ Ray sampleCamera(DevScene* scene, const Camera& cam, int x, int y, glm::vec4 r) {
-    Ray ray;
-#if CAMERA_PANORAMA
-    float u = (x - .5f + r.x) / cam.resolution.x - .5f;
-    float v = (y - .5f + r.y) / cam.resolution.y;
-    glm::vec3 dir = Math::toSphere(glm::vec2(u, v));
-    dir = cam.right * dir.x + cam.up * dir.y + cam.view * dir.z;
-    ray.direction = dir;
-    ray.origin = cam.position;
-#else
-    float aspect = float(cam.resolution.x) / cam.resolution.y;
-    float tanFovY = glm::tan(glm::radians(cam.fov.y));
-    glm::vec2 pixelSize = 1.f / glm::vec2(cam.resolution);
-    glm::vec2 scr = glm::vec2(x, y) * pixelSize;
-    glm::vec2 ruv = scr + pixelSize * glm::vec2(r.x, r.y);
-    ruv = 1.f - ruv * 2.f;
-
-    glm::vec2 pAperture;
-    if (scene->apertureMask != nullptr) {
-        int id = scene->apertureSampler.sample(r.z, r.w);
-        pAperture.x = glm::fract((id + .5f) / scene->apertureMask->width);
-        pAperture.y = (id / scene->apertureMask->width + .5f) / scene->apertureMask->height;
-        pAperture = pAperture * 2.f - 1.f;
-    }
-    else {
-        pAperture = Math::toConcentricDisk(r.z, r.w);
-    }
-
-    glm::vec3 pLens = glm::vec3(pAperture * cam.lensRadius, 0.f);
-
-    glm::vec3 pFocusPlane = glm::vec3(ruv * glm::vec2(aspect, 1.f) * tanFovY, 1.f) * cam.focalDist;
-    glm::vec3 dir = pFocusPlane - pLens;
-    ray.direction = glm::normalize(glm::mat3(cam.right, cam.up, cam.view) * dir);
-    ray.origin = cam.position + cam.right * pLens.x + cam.up * pLens.y;
-#endif
-    return ray;
 }
 
 __global__ void previewGBuffer(int iter, DevScene* scene, const Camera cam, glm::vec3* image, int kind) {
@@ -189,7 +137,7 @@ __global__ void previewGBuffer(int iter, DevScene* scene, const Camera cam, glm:
     int index = y * cam.resolution.x + x;
     Sampler rng = makeSeededRandomEngine(iter, index, 0, scene->sampleSequence);
 
-    Ray ray = sampleCamera(scene, cam, x, y, sample4D(rng));
+    Ray ray = cam.sample(x, y, sample4D(rng));
     Intersection intersec;
     scene->intersect(ray, intersec);
 
@@ -208,215 +156,6 @@ __global__ void previewGBuffer(int iter, DevScene* scene, const Camera cam, glm:
     }
 }
 
-#pragma region streamedPT
-/*
-__global__ void generateRayFromCamera(
-    DevScene* scene, const Camera cam,
-    int iter, int traceDepth, PathSegment* pathSegments
-) {
-    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-
-    if (x < cam.resolution.x && y < cam.resolution.y) {
-        int index = x + (y * cam.resolution.x);
-        PathSegment& segment = pathSegments[index];
-        Sampler rng = makeSeededRandomEngine(iter, index, traceDepth, scene->sampleSequence);
-
-        segment.ray = sampleCamera(scene, cam, x, y, sample4D(rng));
-        segment.throughput = glm::vec3(1.f);
-        segment.radiance = glm::vec3(0.f);
-        segment.pixelIndex = index;
-        segment.remainingBounces = traceDepth;
-    }
-}
-
-__global__ void computeIntersections(
-    int depth,
-    int numPaths,
-    PathSegment* pathSegments,
-    DevScene* scene,
-    Intersection* intersections,
-    int* materialKeys,
-    bool sortMaterial
-#if ENABLE_GBUFFER
-    , Intersection* GBuffer
-#endif
-) {
-    int pathIdx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (pathIdx >= numPaths) {
-        return;
-    }
-
-    Intersection intersec;
-    const PathSegment& segment = pathSegments[pathIdx];
-#if ENABLE_GBUFFER
-    if (depth == 0) {
-        intersections[pathIdx] = GBuffer[pathIdx];
-        return;
-    }
-#endif
-
-#if BVH_DISABLE
-    scene->naiveIntersect(segment.ray, intersec);
-#else
-    scene->intersect(segment.ray, intersec);
-#endif
-
-    if (intersec.primId != NullPrimitive) {
-        if (scene->materials[intersec.matId].type == Material::Type::Light) {
-#if SCENE_LIGHT_SINGLE_SIDED
-            if (glm::dot(intersec.norm, segment.ray.direction) < 0.f) {
-                intersec.primId = NullPrimitive;
-            }
-            else
-#endif
-            if (depth != 0) {
-                // If not first ray, preserve previous sampling information for
-                // MIS calculation
-                intersec.prevPos = segment.ray.origin;
-                if (sortMaterial) {
-                    intersec.prev = segment.prev;
-                }
-            }
-        }
-        else {
-            intersec.wo = -segment.ray.direction;
-        }
-        if (sortMaterial) {
-            materialKeys[pathIdx] = intersec.matId;
-        }
-    }
-    else if (sortMaterial) {
-        materialKeys[pathIdx] = -1;
-    }
-    intersections[pathIdx] = intersec;
-}
-
-__global__ void shadePT(
-    int iter,
-    int depth,
-    PathSegment* segments,
-    Intersection* intersections,
-    DevScene* scene,
-    int numPaths,
-    bool sortMaterial
-) {
-    const int SamplesOneIter = 7;
-
-    int idx = blockDim.x * blockIdx.x + threadIdx.x;
-    if (idx >= numPaths) {
-        return;
-    }
-    Intersection& intersec = intersections[idx];
-    PathSegment& segment = segments[idx];
-
-    if (intersec.primId == NullPrimitive) {
-        if (scene->envMap != nullptr) {
-            glm::vec3 w = segment.ray.direction;
-            glm::vec3 radiance = scene->envMap->linearSample(Math::toPlane(w)) * segment.throughput;
-
-            if (depth == 0) {
-                segment.radiance += radiance * segment.throughput;
-            }
-            else {
-                float weight = segment.prev.deltaSample ? 1.f :
-                    Math::powerHeuristic(segment.prev.BSDFPdf, scene->environmentMapPdf(w));
-                segment.radiance += radiance * weight;
-            }
-        }
-        segment.remainingBounces = 0;
-
-        if (Math::luminance(segment.radiance) < 1e-4f) {
-            segment.pixelIndex = PixelIdxForTerminated;
-        }
-        return;
-    }
-
-    Sampler rng = makeSeededRandomEngine(iter, idx, 4 + depth * SamplesOneIter, scene->sampleSequence);
-
-    const Material material = scene->getTexturedMaterialAndSurface(intersec);
-
-    glm::vec3 accRadiance(0.f);
-
-    if (material.type == Material::Type::Light) {
-        PrevBSDFSampleInfo prev = sortMaterial ? intersec.prev : segment.prev;
-
-        glm::vec3 radiance = material.baseColor;
-        if (depth == 0) {
-            accRadiance += radiance;
-        }
-        else if (prev.deltaSample) {
-            accRadiance += radiance * segment.throughput;
-        }
-        else {
-            float lightPdf = Math::pdfAreaToSolidAngle(
-                Math::luminance(radiance) * 2.f * glm::pi<float>() * scene->getPrimitiveArea(intersec.primId) * scene->sumLightPowerInv,
-                intersec.prevPos, intersec.pos, intersec.norm
-            );
-            float BSDFPdf = prev.BSDFPdf;
-            accRadiance += radiance * segment.throughput * Math::powerHeuristic(BSDFPdf, lightPdf);
-        }
-        segment.remainingBounces = 0;
-    }
-    else {
-        bool deltaBSDF = (material.type == Material::Type::Dielectric);
-        if (material.type != Material::Type::Dielectric && glm::dot(intersec.norm, intersec.wo) < 0.f) {
-            intersec.norm = -intersec.norm;
-        }
-
-        if (!deltaBSDF) {
-            glm::vec3 radiance;
-            glm::vec3 wi;
-            float lightPdf = scene->sampleDirectLight(intersec.pos, sample4D(rng), radiance, wi);
-
-            if (lightPdf > 0.f) {
-                float BSDFPdf = material.pdf(intersec.norm, intersec.wo, wi);
-                accRadiance += segment.throughput * material.BSDF(intersec.norm, intersec.wo, wi) *
-                    radiance * Math::satDot(intersec.norm, wi) / lightPdf * Math::powerHeuristic(lightPdf, BSDFPdf);
-            }
-        }
-
-        BSDFSample sample;
-        material.sample(intersec.norm, intersec.wo, sample3D(rng), sample);
-
-        if (sample.type == BSDFSampleType::Invalid) {
-            // Terminate path if sampling fails
-            segment.remainingBounces = 0;
-        }
-        else if (sample.pdf < 1e-8f) {
-            segment.remainingBounces = 0;
-        }
-        else {
-            bool deltaSample = (sample.type & BSDFSampleType::Specular);
-            segment.throughput *= sample.bsdf / sample.pdf *
-                (deltaSample ? 1.f : Math::absDot(intersec.norm, sample.dir));
-            segment.ray = makeOffsetedRay(intersec.pos, sample.dir);
-            segment.prev = { sample.pdf, deltaSample };
-            segment.remainingBounces--;
-        }
-    }
-    segment.radiance += accRadiance;
-}
-
-// Add the current iteration's output to the overall image
-__global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iterationPaths) {
-    int index = (blockIdx.x * blockDim.x) + threadIdx.x;
-
-    if (index < nPaths) {
-        const PathSegment& iterationPath = iterationPaths[index];
-        if (iterationPath.pixelIndex >= 0 && iterationPath.remainingBounces <= 0) {
-            glm::vec3 r = iterationPath.radiance;
-            if (isnan(r.x) || isnan(r.y) || isnan(r.z) || isinf(r.x) || isinf(r.y) || isinf(r.z)) {
-                return;
-            }
-            image[iterationPath.pixelIndex] += glm::clamp(r, glm::vec3(0.f), glm::vec3(FLT_MAX / 10.f));
-        }
-    }
-}
-*/
-#pragma endregion
-
 __global__ void shadeReSTIR_DI(
     int iter, 
     int M_Light, int M_BSDF,
@@ -434,7 +173,7 @@ __global__ void shadeReSTIR_DI(
     int index = y * cam.resolution.x + x;
     Sampler rng = makeSeededRandomEngine(iter, index, 0, scene->sampleSequence);
 
-    Ray ray = sampleCamera(scene, cam, x, y, sample4D(rng));
+    Ray ray = cam.sample(x, y, sample4D(rng));
     Intersection intersec;
     scene->intersect(ray, intersec);
 
@@ -632,7 +371,7 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene* scene, Camera c
     int index = y * cam.resolution.x + x;
     Sampler rng = makeSeededRandomEngine(iter, index, 0, scene->sampleSequence);
 
-    Ray ray = sampleCamera(scene, cam, x, y, sample4D(rng));
+    Ray ray = cam.sample(x, y, sample4D(rng));
     Intersection intersec;
     scene->intersect(ray, intersec);
 
@@ -757,7 +496,7 @@ __global__ void BVHVisualize(int iter, DevScene* scene, Camera cam, glm::vec3* i
     int index = y * cam.resolution.x + x;
 
     Sampler rng = makeSeededRandomEngine(iter, index, 0, scene->sampleSequence);
-    Ray ray = sampleCamera(scene, cam, x, y, sample4D(rng));
+    Ray ray = cam.sample(x, y, sample4D(rng));
 
     Intersection intersec;
     scene->visualizedIntersect(ray, intersec);
@@ -774,15 +513,6 @@ __global__ void BVHVisualize(int iter, DevScene* scene, Camera cam, glm::vec3* i
 void pathTrace(uchar4* pbo, int frame, int iter) {
     const Camera& cam = hstScene->camera;
     const int pixelCount = cam.resolution.x * cam.resolution.y;
-
-    // 2D block for generating ray from camera
-    const dim3 blockSize2D(8, 8);
-    const dim3 blocksPerGrid2D(
-        (cam.resolution.x + blockSize2D.x - 1) / blockSize2D.x,
-        (cam.resolution.y + blockSize2D.y - 1) / blockSize2D.y);
-
-    int depth = 0;
-    int numPaths = pixelCount;
 
     const int BlockSizeSinglePTX = 8;
     const int BlockSizeSinglePTY = 8;
@@ -812,12 +542,17 @@ void pathTrace(uchar4* pbo, int frame, int iter) {
         break;
     }
 
+    // 2D block sending pixel data
+    const dim3 blockSize2D(8, 8);
+    const dim3 blocksPerGrid2D(
+        (cam.resolution.x + blockSize2D.x - 1) / blockSize2D.x,
+        (cam.resolution.y + blockSize2D.y - 1) / blockSize2D.y);
     // Send results to OpenGL buffer for rendering
     sendImageToPBO<<<blocksPerGrid2D, blockSize2D>>>(pbo, cam.resolution, iter, devImage, Settings::toneMapping);
 
     // Retrieve image from GPU
-    cudaMemcpy(hstScene->state.image.data(), devImage,
-        pixelCount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+    CUDA::copyDevToHost(hstScene->state.image.data(), devImage,
+        pixelCount * sizeof(glm::vec3));
 
     checkCUDAError("pathTrace");
 }

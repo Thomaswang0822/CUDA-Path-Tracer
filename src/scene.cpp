@@ -230,7 +230,7 @@ void Scene::buildDevData() {
 
     hstScene.create(*this);
     cudaMalloc(&devScene, sizeof(DevScene));
-    cudaMemcpyHostToDev(devScene, &hstScene, sizeof(DevScene));
+    CUDA::copyHostToDev(devScene, &hstScene, sizeof(DevScene));
     checkCUDAError("Dev Scene");
 
     meshData.clear();
@@ -247,7 +247,7 @@ void Scene::buildDevData() {
 
 void Scene::clear() {
     hstScene.destroy();
-    cudaSafeFree(devScene);
+    CUDA::safeFree(devScene);
 }
 
 void Scene::loadModel(const std::string& objId) {
@@ -478,46 +478,46 @@ void DevScene::create(const Scene& scene) {
 
     int textureOffset = 0;
     for (auto tex : scene.textures) {
-        cudaMemcpyHostToDev(textureData + textureOffset, tex->data(), tex->byteSize());
+        CUDA::copyHostToDev(textureData + textureOffset, tex->data(), tex->byteSize());
         checkCUDAError("DevScene::texture::copy");
         textureObjs.push_back({ tex, textureData + textureOffset });
         textureOffset += tex->byteSize() / sizeof(glm::vec3);
     }
     cudaMalloc(&textures, textureObjs.size() * sizeof(DevTextureObj));
     checkCUDAError("DevScene::textureObjs::malloc");
-    cudaMemcpyHostToDev(textures, textureObjs.data(), textureObjs.size() * sizeof(DevTextureObj));
+    CUDA::copyHostToDev(textures, textureObjs.data(), textureObjs.size() * sizeof(DevTextureObj));
     checkCUDAError("DevScene::textureObjs::copy");
 
     cudaMalloc(&materials, byteSizeOf(scene.materials));
-    cudaMemcpyHostToDev(materials, scene.materials.data(), byteSizeOf(scene.materials));
+    CUDA::copyHostToDev(materials, scene.materials.data(), byteSizeOf(scene.materials));
 
     cudaMalloc(&materialIds, byteSizeOf(scene.materialIds));
-    cudaMemcpyHostToDev(materialIds, scene.materialIds.data(), byteSizeOf(scene.materialIds));
+    CUDA::copyHostToDev(materialIds, scene.materialIds.data(), byteSizeOf(scene.materialIds));
     checkCUDAError("DevScene::material");
 
     cudaMalloc(&vertices, byteSizeOf(scene.meshData.vertices));
-    cudaMemcpyHostToDev(vertices, scene.meshData.vertices.data(), byteSizeOf(scene.meshData.vertices));
+    CUDA::copyHostToDev(vertices, scene.meshData.vertices.data(), byteSizeOf(scene.meshData.vertices));
 
     cudaMalloc(&normals, byteSizeOf(scene.meshData.normals));
-    cudaMemcpyHostToDev(normals, scene.meshData.normals.data(), byteSizeOf(scene.meshData.normals));
+    CUDA::copyHostToDev(normals, scene.meshData.normals.data(), byteSizeOf(scene.meshData.normals));
 
     cudaMalloc(&texcoords, byteSizeOf(scene.meshData.texcoords));
-    cudaMemcpyHostToDev(texcoords, scene.meshData.texcoords.data(), byteSizeOf(scene.meshData.texcoords));
+    CUDA::copyHostToDev(texcoords, scene.meshData.texcoords.data(), byteSizeOf(scene.meshData.texcoords));
 
     cudaMalloc(&boundingBoxes, byteSizeOf(scene.boundingBoxes));
-    cudaMemcpyHostToDev(boundingBoxes, scene.boundingBoxes.data(), byteSizeOf(scene.boundingBoxes));
+    CUDA::copyHostToDev(boundingBoxes, scene.boundingBoxes.data(), byteSizeOf(scene.boundingBoxes));
 
     for (int i = 0; i < 6; i++) {
         cudaMalloc(&BVHNodes[i], byteSizeOf(scene.BVHNodes[i]));
-        cudaMemcpyHostToDev(BVHNodes[i], scene.BVHNodes[i].data(), byteSizeOf(scene.BVHNodes[i]));
+        CUDA::copyHostToDev(BVHNodes[i], scene.BVHNodes[i].data(), byteSizeOf(scene.BVHNodes[i]));
     }
     BVHSize = scene.BVHSize;
 
     cudaMalloc(&lightPrimIds, byteSizeOf(scene.lightPrimIds));
-    cudaMemcpyHostToDev(lightPrimIds, scene.lightPrimIds.data(), byteSizeOf(scene.lightPrimIds));
+    CUDA::copyHostToDev(lightPrimIds, scene.lightPrimIds.data(), byteSizeOf(scene.lightPrimIds));
 
     cudaMalloc(&lightUnitRadiance, byteSizeOf(scene.lightUnitRadiance));
-    cudaMemcpyHostToDev(lightUnitRadiance, scene.lightUnitRadiance.data(), byteSizeOf(scene.lightUnitRadiance));
+    CUDA::copyHostToDev(lightUnitRadiance, scene.lightUnitRadiance.data(), byteSizeOf(scene.lightUnitRadiance));
 
     checkCUDAError("DevScene::meshData");
 
@@ -539,32 +539,32 @@ void DevScene::create(const Scene& scene) {
     std::vector<char> sobolData(SobolSampleNum * SobolSampleDim * sizeof(uint32_t));
     sobolFile.read(sobolData.data(), byteSizeOf(sobolData));
     cudaMalloc(&sampleSequence, byteSizeOf(sobolData));
-    cudaMemcpyHostToDev(sampleSequence, sobolData.data(), byteSizeOf(sobolData));
+    CUDA::copyHostToDev(sampleSequence, sobolData.data(), byteSizeOf(sobolData));
 #endif
 
     checkCUDAError("DevScene::samplers");
 }
 
 void DevScene::destroy() {
-    cudaSafeFree(textureData);
-    cudaSafeFree(textures);
-    cudaSafeFree(materials);
-    cudaSafeFree(materialIds);
+    CUDA::safeFree(textureData);
+    CUDA::safeFree(textures);
+    CUDA::safeFree(materials);
+    CUDA::safeFree(materialIds);
     
-    cudaSafeFree(vertices);
-    cudaSafeFree(normals);
-    cudaSafeFree(texcoords);
-    cudaSafeFree(boundingBoxes);
+    CUDA::safeFree(vertices);
+    CUDA::safeFree(normals);
+    CUDA::safeFree(texcoords);
+    CUDA::safeFree(boundingBoxes);
 
     for (int i = 0; i < 6; i++) {
-        cudaSafeFree(BVHNodes[i]);
+        CUDA::safeFree(BVHNodes[i]);
     }
 
-    cudaSafeFree(lightPrimIds);
-    cudaSafeFree(lightUnitRadiance);
+    CUDA::safeFree(lightPrimIds);
+    CUDA::safeFree(lightUnitRadiance);
     lightSampler.destroy();
     envMapSampler.destroy();
     apertureSampler.destroy();
 
-    cudaSafeFree(sampleSequence);
+    CUDA::safeFree(sampleSequence);
 }

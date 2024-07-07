@@ -7,19 +7,12 @@
 
 static std::string startTimeString;
 
-// For camera controls
+// For camera controls via ImGui
 static bool leftMousePressed = false;
 static bool rightMousePressed = false;
 static bool middleMousePressed = false;
 static double lastX;
 static double lastY;
-
-//static float dtheta = 0, dphi = 0;
-//static glm::vec3 cammove;
-//
-//float zoom, theta, phi;
-//glm::vec3 cameraPosition;
-//glm::vec3 ogLookAt; // for recentering the camera
 
 Scene* scene;
 RenderState* renderState;
@@ -27,6 +20,22 @@ int iteration;
 
 int width;
 int height;
+
+/// device buffers:
+/// malloc and free in main in order to
+/// share them in pathtrace.cu and restir.cu
+namespace devBuffer {
+	glm::vec3* image = nullptr;
+
+
+	void init() {
+
+	}
+
+	void free() {
+
+	}
+}
 
 //-------------------------------
 //-------------MAIN--------------

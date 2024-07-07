@@ -190,12 +190,12 @@ struct DevDiscreteSampler1D {
 	void create(const DiscreteSampler1D<T>& hstSampler) {
 		size_t size = byteSizeOf<DistribT>(hstSampler.binomDistribs);
 		cudaMalloc(&devBinomDistribs, size);
-		cudaMemcpyHostToDev(devBinomDistribs, hstSampler.binomDistribs.data(), size);
+		CUDA::copyHostToDev(devBinomDistribs, hstSampler.binomDistribs.data(), size);
 		length = hstSampler.binomDistribs.size();
 	}
 
 	void destroy() {
-		cudaSafeFree(devBinomDistribs);
+		CUDA::safeFree(devBinomDistribs);
 		length = 0;
 	}
 
