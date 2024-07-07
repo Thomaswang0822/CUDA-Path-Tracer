@@ -1,21 +1,13 @@
-#include <cstdio>
-#include <cuda.h>
+#include <cuda_runtime.h>
 #include <cmath>
-#include <thrust/execution_policy.h>
-#include <thrust/random.h>
-#include <thrust/remove.h>
 #include <thrust/device_ptr.h>
-#include <thrust/sort.h>
 
 #include "sceneStructs.h"
 #include "material.h"
 #include "scene.h"
-#include "glm/glm.hpp"
-#include "glm/gtx/norm.hpp"
 #include "utilities.h"
 #include "pathtrace.h"
 #include "intersections.h"
-#include "interactions.h"
 #include "mathUtil.h"
 #include "sampler.h"
 #include "restir.h"
@@ -62,31 +54,17 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution,
 #define PixelIdxForTerminated -1
 
 static Scene* hstScene = nullptr;
-static GuiDataContainer* guiData = nullptr;
 static glm::vec3* devImage = nullptr;
-static PathSegment* devPaths = nullptr;
-static PathSegment* devTerminatedPaths = nullptr;
-static Intersection* devIntersections = nullptr;
-static int* devIntersecMatKeys = nullptr;
-static int* devSegmentMatKeys = nullptr;
+
 // TODO: static variables for device memory, any extra info you need, etc
 // ...
 static thrust::device_ptr<PathSegment> devPathsThr;
 static thrust::device_ptr<PathSegment> devTerminatedPathsThr;
 
 static thrust::device_ptr<Intersection> devIntersectionsThr;
-static thrust::device_ptr<int> devIntersecMatKeysThr;
-static thrust::device_ptr<int> devSegmentMatKeysThr;
 
 #if ENABLE_GBUFFER
 static Intersection* devGBuffer = nullptr;
-#endif
- 
-void InitDataContainer(GuiDataContainer* imGuiData) {
-    guiData = imGuiData;
-}
-
-#if ENABLE_GBUFFER
 #endif
 
 __global__ void renderGBuffer(DevScene* scene, Camera cam, Intersection *GBuffer) {
@@ -138,19 +116,6 @@ void pathTraceInit(Scene* scene) {
     cudaMalloc(&devImage, pixelcount * sizeof(glm::vec3));
     cudaMemset(devImage, 0, pixelcount * sizeof(glm::vec3));
 
-    cudaMalloc(&devPaths, pixelcount * sizeof(PathSegment));
-    cudaMalloc(&devTerminatedPaths, pixelcount * sizeof(PathSegment));
-    devPathsThr = thrust::device_ptr<PathSegment>(devPaths);
-    devTerminatedPathsThr = thrust::device_ptr<PathSegment>(devTerminatedPaths);
-
-    cudaMalloc(&devIntersections, pixelcount * sizeof(Intersection));
-    cudaMemset(devIntersections, 0, pixelcount * sizeof(Intersection));
-    devIntersectionsThr = thrust::device_ptr<Intersection>(devIntersections);
-
-    cudaMalloc(&devIntersecMatKeys, pixelcount * sizeof(int));
-    cudaMalloc(&devSegmentMatKeys, pixelcount * sizeof(int));
-    devIntersecMatKeysThr = thrust::device_ptr<int>(devIntersecMatKeys);
-    devSegmentMatKeysThr = thrust::device_ptr<int>(devSegmentMatKeys);
     checkCUDAError("pathTraceInit");
 
 #if ENABLE_GBUFFER
@@ -169,11 +134,6 @@ void pathTraceInit(Scene* scene) {
 
 void pathTraceFree() {
     cudaSafeFree(devImage);  // no-op if devImage is null
-    cudaSafeFree(devPaths);
-    cudaSafeFree(devTerminatedPaths);
-    cudaSafeFree(devIntersections);
-    cudaSafeFree(devIntersecMatKeys);
-    cudaSafeFree(devSegmentMatKeys);
 #if ENABLE_GBUFFER
     cudaSafeFree(devGBuffer);
 #endif
@@ -220,26 +180,6 @@ __device__ Ray sampleCamera(DevScene* scene, const Camera& cam, int x, int y, gl
     return ray;
 }
 
-__global__ void generateRayFromCamera(
-    DevScene* scene, const Camera cam, 
-    int iter, int traceDepth, PathSegment* pathSegments
-) {
-    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-
-    if (x < cam.resolution.x && y < cam.resolution.y) {
-        int index = x + (y * cam.resolution.x);
-        PathSegment& segment = pathSegments[index];
-        Sampler rng = makeSeededRandomEngine(iter, index, traceDepth, scene->sampleSequence);
-
-        segment.ray = sampleCamera(scene, cam, x, y, sample4D(rng));
-        segment.throughput = glm::vec3(1.f);
-        segment.radiance = glm::vec3(0.f);
-        segment.pixelIndex = index;
-        segment.remainingBounces = traceDepth;
-    }
-}
-
 __global__ void previewGBuffer(int iter, DevScene* scene, const Camera cam, glm::vec3* image, int kind) {
     int x = blockDim.x * blockIdx.x + threadIdx.x;
     int y = blockDim.y * blockIdx.y + threadIdx.y;
@@ -265,6 +205,28 @@ __global__ void previewGBuffer(int iter, DevScene* scene, const Camera cam, glm:
     }
     else if (kind == 2) {
         image[index] += glm::vec3(intersec.uv, 1.f);
+    }
+}
+
+#pragma region streamedPT
+/*
+__global__ void generateRayFromCamera(
+    DevScene* scene, const Camera cam,
+    int iter, int traceDepth, PathSegment* pathSegments
+) {
+    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+
+    if (x < cam.resolution.x && y < cam.resolution.y) {
+        int index = x + (y * cam.resolution.x);
+        PathSegment& segment = pathSegments[index];
+        Sampler rng = makeSeededRandomEngine(iter, index, traceDepth, scene->sampleSequence);
+
+        segment.ray = sampleCamera(scene, cam, x, y, sample4D(rng));
+        segment.throughput = glm::vec3(1.f);
+        segment.radiance = glm::vec3(0.f);
+        segment.pixelIndex = index;
+        segment.remainingBounces = traceDepth;
     }
 }
 
@@ -452,6 +414,8 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
         }
     }
 }
+*/
+#pragma endregion
 
 __global__ void shadeReSTIR_DI(
     int iter, 
@@ -807,18 +771,6 @@ __global__ void BVHVisualize(int iter, DevScene* scene, Camera cam, glm::vec3* i
     image[index] += glm::vec3(float(intersec.primId) / logDepth * .06f);
 }
 
-struct CompactTerminatedPaths {
-    __host__ __device__ bool operator() (const PathSegment& segment) {
-        return !(segment.pixelIndex >= 0 && segment.remainingBounces <= 0);
-    }
-};
-
-struct RemoveInvalidPaths {
-    __host__ __device__ bool operator() (const PathSegment& segment) {
-        return segment.pixelIndex < 0 || segment.remainingBounces <= 0;
-    }
-};
-
 void pathTrace(uchar4* pbo, int frame, int iter) {
     const Camera& cam = hstScene->camera;
     const int pixelCount = cam.resolution.x * cam.resolution.y;
@@ -832,94 +784,32 @@ void pathTrace(uchar4* pbo, int frame, int iter) {
     int depth = 0;
     int numPaths = pixelCount;
 
-    auto devTerminatedThr = devTerminatedPathsThr;
+    const int BlockSizeSinglePTX = 8;
+    const int BlockSizeSinglePTY = 8;
+    int blockNumSinglePTX = (cam.resolution.x + BlockSizeSinglePTX - 1) / BlockSizeSinglePTX;
+    int blockNumSinglePTY = (cam.resolution.y + BlockSizeSinglePTY - 1) / BlockSizeSinglePTY;
 
-    if (Settings::tracer == Tracer::Streamed) {
-        generateRayFromCamera<<<blocksPerGrid2D, blockSize2D>>>(hstScene->devScene, cam, iter, Settings::traceDepth, devPaths);
-        checkCUDAError("PT::generateRayFromCamera");
-        cudaDeviceSynchronize();
+    dim3 singlePTBlockNum(blockNumSinglePTX, blockNumSinglePTY);
+    dim3 singlePTBlockSize(BlockSizeSinglePTX, BlockSizeSinglePTY);
 
-        bool iterationComplete = false;
-        while (!iterationComplete) {
-            // clean shading chunks
-            cudaMemset(devIntersections, 0, pixelCount * sizeof(Intersection));
-
-            // tracing
-            const int BlockSizeIntersec = 128;
-            int blockNumIntersec = (numPaths + BlockSizeIntersec - 1) / BlockSizeIntersec;
-            computeIntersections<<<blockNumIntersec, BlockSizeIntersec>>>(
-                depth, numPaths, devPaths, hstScene->devScene, devIntersections, devIntersecMatKeys, Settings::sortMaterial
-#if ENABLE_GBUFFER
-                , devGBuffer
-#endif
-            );
-            checkCUDAError("PT::computeInteractions");
-            cudaDeviceSynchronize();
-
-            if (Settings::sortMaterial) {
-                cudaMemcpyDevToDev(devSegmentMatKeys, devIntersecMatKeys, numPaths * sizeof(int));
-                thrust::sort_by_key(devIntersecMatKeysThr, devIntersecMatKeysThr + numPaths, devIntersectionsThr);
-                thrust::sort_by_key(devSegmentMatKeysThr, devSegmentMatKeysThr + numPaths, devPathsThr);
-            }
-
-            const int BlockSizeSample = 64;
-            int blockNumSample = (numPaths + BlockSizeSample - 1) / BlockSizeSample;
-
-            shadePT<<<blockNumSample, BlockSizeSample>>>(
-                iter, depth, devPaths, devIntersections, hstScene->devScene, numPaths, Settings::sortMaterial
-            );
-            checkCUDAError("PT::sampleSurface");
-            cudaDeviceSynchronize();
-
-            // Compact paths that are terminated but carry contribution into a separate buffer
-            devTerminatedThr = thrust::remove_copy_if(devPathsThr, devPathsThr + numPaths, devTerminatedThr, CompactTerminatedPaths());
-            // Only keep active paths
-            auto end = thrust::remove_if(devPathsThr, devPathsThr + numPaths, RemoveInvalidPaths());
-            numPaths = end - devPathsThr;
-            //std::cout << "Remaining paths: " << numPaths << "\n";
-
-            iterationComplete = (numPaths == 0);
-            depth++;
-
-            if (guiData != nullptr) {
-                guiData->TracedDepth = depth;
-            }
-        }
-
-        // Assemble this iteration and apply it to the image
-        const int BlockSizeGather = 128;
-        dim3 numBlocksPixels = (pixelCount + BlockSizeGather - 1) / BlockSizeGather;
-        int numContributing = devTerminatedThr.get() - devTerminatedPaths;
-        finalGather<<<numBlocksPixels, BlockSizeGather>>>(numContributing, devImage, devTerminatedPaths);
-    }
-    else {
-        const int BlockSizeSinglePTX = 8;
-        const int BlockSizeSinglePTY = 8;
-        int blockNumSinglePTX = (cam.resolution.x + BlockSizeSinglePTX - 1) / BlockSizeSinglePTX;
-        int blockNumSinglePTY = (cam.resolution.y + BlockSizeSinglePTY - 1) / BlockSizeSinglePTY;
-
-        dim3 singlePTBlockNum(blockNumSinglePTX, blockNumSinglePTY);
-        dim3 singlePTBlockSize(BlockSizeSinglePTX, BlockSizeSinglePTY);
-
-        if (Settings::tracer == Tracer::SingleKernel) {
-            singleKernelPT<<<singlePTBlockNum, singlePTBlockSize>>>(iter, Settings::traceDepth, hstScene->devScene, cam, devImage);
-        }
-        else if (Settings::tracer == Tracer::ReSTIR_DI) {
-            shadeReSTIR_DI<<<singlePTBlockNum, singlePTBlockSize>>>(iter, 
-                ReSTIRSettings::M_Light, ReSTIRSettings::M_BSDF,
-                hstScene->devScene, cam, devImage);
-        }
-        else if (Settings::tracer == Tracer::BVHVisualize) {
-            BVHVisualize<<<singlePTBlockNum, singlePTBlockSize>>>(iter, hstScene->devScene, cam, devImage);
-        }
-        else {
-            previewGBuffer<<<singlePTBlockNum, singlePTBlockSize>>>(iter, hstScene->devScene, cam, devImage,
-                Settings::GBufferPreviewOpt);
-        }
-
-        if (guiData != nullptr) {
-            guiData->TracedDepth = Settings::traceDepth;
-        }
+    switch (Settings::tracer)
+    {
+    case Tracer::SingleKernel:
+        singleKernelPT << <singlePTBlockNum, singlePTBlockSize >> > (iter, Settings::traceDepth, hstScene->devScene, cam, devImage);
+        break;
+    case Tracer::BVHVisualize:
+        BVHVisualize << <singlePTBlockNum, singlePTBlockSize >> > (iter, hstScene->devScene, cam, devImage);
+        break;
+    case Tracer::GBufferPreview:
+        previewGBuffer << <singlePTBlockNum, singlePTBlockSize >> > (iter, hstScene->devScene, cam, devImage,
+            Settings::GBufferPreviewOpt);
+        break;
+    case Tracer::ReSTIR_DI:
+        shadeReSTIR_DI << <singlePTBlockNum, singlePTBlockSize >> > (iter,
+            ReSTIRSettings::M_Light, ReSTIRSettings::M_BSDF,
+            hstScene->devScene, cam, devImage);
+    default:
+        break;
     }
 
     // Send results to OpenGL buffer for rendering

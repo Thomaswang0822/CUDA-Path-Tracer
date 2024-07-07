@@ -10,4 +10,3 @@ bool init();
 void mainLoop();
 
 bool MouseOverImGuiWindow();
-void InitImguiData(GuiDataContainer* guiData);

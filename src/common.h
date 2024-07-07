@@ -16,8 +16,8 @@ struct ToneMapping {
 
 struct Tracer {
     enum {
-        Streamed = 0, SingleKernel = 1, BVHVisualize = 2, GBufferPreview = 3,
-        ReSTIR_DI = 4
+        SingleKernel = 0, BVHVisualize = 1, GBufferPreview = 2,
+        ReSTIR_DI = 3
     };
 };
 
@@ -27,6 +27,8 @@ struct Settings {
     static int tracer;
     static bool sortMaterial;
     static int GBufferPreviewOpt;
+
+    static bool enableReSTIR;
 };
 
 struct State {

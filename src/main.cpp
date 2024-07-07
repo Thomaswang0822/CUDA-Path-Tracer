@@ -14,15 +14,14 @@ static bool middleMousePressed = false;
 static double lastX;
 static double lastY;
 
-static float dtheta = 0, dphi = 0;
-static glm::vec3 cammove;
-
-float zoom, theta, phi;
-glm::vec3 cameraPosition;
-glm::vec3 ogLookAt; // for recentering the camera
+//static float dtheta = 0, dphi = 0;
+//static glm::vec3 cammove;
+//
+//float zoom, theta, phi;
+//glm::vec3 cameraPosition;
+//glm::vec3 ogLookAt; // for recentering the camera
 
 Scene* scene;
-GuiDataContainer* guiData;
 RenderState* renderState;
 int iteration;
 
@@ -32,110 +31,6 @@ int height;
 //-------------------------------
 //-------------MAIN--------------
 //-------------------------------
-
-void testAABB() {
-	AABB boxes[] = {
-		{ glm::vec3(-1.f), glm::vec3(1.f) },
-		{ glm::vec3(0.f), glm::vec3(1.f) },
-		{ glm::vec3(0.f), glm::vec3(1.f) },
-		{ glm::vec3(0.f), glm::vec3(1.f) },
-		{ glm::vec3(0.f), glm::vec3(1.f) },
-	};
-
-	Ray ray[] = {
-		{ glm::vec3(-0.1f), glm::normalize(glm::vec3(1.f, 0.f, 0.f)) },
-		{ glm::vec3(0.f, 0.1f, 0.5f), glm::normalize(glm::vec3(1.f, 1.f, 0.f)) },
-		{ glm::vec3(-1.f), glm::normalize(glm::vec3(1.f, 0.f, 0.f)) },
-		{ glm::vec3(1.1f), glm::normalize(glm::vec3(1.f, 1.f, 0.f)) },
-		{ glm::vec3(2.f), glm::normalize(glm::vec3(-1.f)) },
-	};
-
-	for (int i = 0; i < sizeof(boxes) / sizeof(AABB); i++) {
-		float dist;
-		bool intersec = boxes[i].intersect(ray[i], dist);
-		std::cout << intersec << " " << dist << "\n";
-	}
-}
-
-/**
-* GLM intersection returns false when triangle is back-faced
-*/
-void testTriangle() {
-	glm::vec3 v[] = { glm::vec3(-1.f, -1.f, 0.f), glm::vec3(1.f, -1.f, 0.f), glm::vec3(1.f, 1.f, 0.f) };
-	glm::vec3 ori(0.f, 0.f, 1.f);
-	glm::vec3 dir(0.f, 0.f, -1.f);
-	glm::vec2 bary;
-	float dist;
-	bool hit = intersectTriangle({ ori, dir }, v[0], v[1], v[2], bary, dist);
-	std::cout << hit << " " << vec3ToString(glm::vec3(1.f - bary.x - bary.y, bary)) << "\n";
-	glm::vec3 hitPos = v[0] * (1.f - bary.x - bary.y) + v[1] * bary.x + v[2] * bary.y;
-	std::cout << vec3ToString(hitPos) << "\n";
-	hit = intersectTriangle({ -ori, -dir }, v[0], v[1], v[2], bary, dist);
-	std::cout << hit << " " << vec3ToString(glm::vec3(1.f - bary.x - bary.y, bary)) << "\n";
-}
-
-void testDiscreteSampler1D() {
-	std::vector<float> distrib = { .1f, .2f, .3f, .4f, 2.f, 3.f, 4.f };
-	DiscreteSampler1D<float> sampler(distrib);
-	int stat[7] = { 0 };
-
-	std::default_random_engine rng(time(nullptr));
-
-	for (int i = 0; i < 1000000; i++) {
-		float r1 = std::uniform_real_distribution<float>(0.f, 1.f)(rng);
-		float r2 = std::uniform_real_distribution<float>(0.f, 1.f)(rng);
-		stat[sampler.sample(r1, r2)]++;
-	}
-
-	for (auto i : stat) {
-		std::cout << i << " ";
-	}
-	std::cout << "\n";
-}
-
-void testDiscreteSampler2D() {
-	std::vector<float> distrib = {
-		.1f, .2f,  .3f,  .4f, 2.f,  3.f,  4.f,
-		.2f, .4f,  .6f,  .8f, 4.f,  6.f,  8.f,
-		.3f, .6f,  .9f, 1.2f, 6.f,  9.f, 12.f,
-		.4f, .8f, 1.2f, 1.6f, 8.f, 12.f, 16.f
-	};
-
-	DiscreteSampler2D<float> sampler(distrib.data(), 7, 4);
-
-	int stat[4][7] = { 0 };
-	int statRow[4] = { 0 };
-	int statCol[7] = { 0 };
-	std::default_random_engine rng(time(nullptr));
-
-	for (int i = 0; i < 1000000; i++) {
-		float r1 = std::uniform_real_distribution<float>(0.f, 1.f)(rng);
-		float r2 = std::uniform_real_distribution<float>(0.f, 1.f)(rng);
-		float r3 = std::uniform_real_distribution<float>(0.f, 1.f)(rng);
-		float r4 = std::uniform_real_distribution<float>(0.f, 1.f)(rng);
-
-		auto pos = sampler.sample(r1, r2, r3, r4);
-		stat[pos.first][pos.second]++;
-		statRow[pos.first]++;
-		statCol[pos.second]++;
-	}
-
-	for (int i = 0; i < 4; i++) {
-		for (int j = 0; j < 7; j++) {
-			std::cout << std::setw(4) << stat[i][j] << " ";
-		}
-		std::cout << "\n";
-	}
-	std::cout << "\n";
-	for (int i = 0; i < 7; i++) {
-		std::cout << std::setw(4) << statCol[i] << " ";
-	}
-	std::cout << "\n";
-	for (int i = 0; i < 4; i++) {
-		std::cout << std::setw(4) << statRow[i] << " ";
-	}
-	std::cout << "\n";
-}
 
 int main(int argc, char** argv) {
 	startTimeString = currentTimeString();
@@ -151,9 +46,6 @@ int main(int argc, char** argv) {
 	scene = new Scene(sceneFile);
 	scene->buildDevData();
 
-	//Create Instance for ImGUIData
-	guiData = new GuiDataContainer();
-
 	// Set up camera stuff from loaded path tracer settings
 	iteration = 0;
 	renderState = &scene->state;
@@ -163,10 +55,6 @@ int main(int argc, char** argv) {
 
 	// Initialize CUDA and GL components
 	init();
-
-	// Initialize ImGui Data
-	InitImguiData(guiData);
-	InitDataContainer(guiData);
 
 	// GLFW main loop
 	mainLoop();

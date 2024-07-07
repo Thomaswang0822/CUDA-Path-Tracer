@@ -9,13 +9,6 @@
 #include <string>
 #include <vector>
 
-class GuiDataContainer
-{
-public:
-    GuiDataContainer() : TracedDepth(0) {}
-    int TracedDepth;
-};
-
 namespace utilityCore {
     extern float clamp(float f, float min, float max);
     extern bool replaceString(std::string& str, const std::string& from, const std::string& to);

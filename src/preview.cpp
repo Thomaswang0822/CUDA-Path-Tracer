@@ -11,7 +11,6 @@ GLuint pbo;
 GLuint displayImage;
 
 GLFWwindow* window;
-GuiDataContainer* imguiData = NULL;
 ImGuiIO* io = nullptr;
 bool mouseOverImGuiWinow = false;
 
@@ -191,10 +190,6 @@ bool init() {
 	return true;
 }
 
-void InitImguiData(GuiDataContainer* guiData) {
-	imguiData = guiData;
-}
-
 
 // LOOK: Un-Comment to check ImGui Usage
 void RenderImGui() {
@@ -217,7 +212,6 @@ void RenderImGui() {
 		ImGuiWindowFlags_NoSavedSettings |
 		ImGuiWindowFlags_NoFocusOnAppearing |
 		ImGuiWindowFlags_NoNav); {
-		ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
 		ImGui::Text("BVH Size %d", scene->BVHSize);
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 
@@ -225,15 +219,12 @@ void RenderImGui() {
 	}
 
 	ImGui::Begin("Options"); {
-		const char* Tracers[] = { "Streamed", "Single Kernel", "BVH Visualize", "GBuffer Preview", "ReSTIR_DI"};
+		const char* Tracers[] = { "Single Kernel", "BVH Visualize", "GBuffer Preview", "ReSTIR_DI"};
 		if (ImGui::Combo("Tracer", &Settings::tracer, Tracers, IM_ARRAYSIZE(Tracers))) {
 			State::camChanged = true;
 		}
 
-		if (Settings::tracer == Tracer::Streamed) {
-			ImGui::Checkbox("Sort Material", &Settings::sortMaterial);
-		}
-		else if (Settings::tracer == Tracer::GBufferPreview) {
+		if (Settings::tracer == Tracer::GBufferPreview) {
 			const char* Modes[] = { "Position", "Normal", "Texcoord" };
 			if (ImGui::Combo("Mode", &Settings::GBufferPreviewOpt, Modes, IM_ARRAYSIZE(Modes))) {
 				State::camChanged = true;
