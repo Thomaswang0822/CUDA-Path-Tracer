@@ -7,4 +7,4 @@
 
 void pathTraceInit(Scene *scene);
 void pathTraceFree();
-void pathTrace(uchar4 *pbo, int frame, int iteration);
+void pathTrace(uchar4* pbo, glm::vec3* devImage, Scene* hstScene);

@@ -3,7 +3,7 @@
 #include "common.h"
 
 extern GLuint pbo;
-extern Scene* hstScene;
+//extern Scene* hstScene;
 
 std::string currentTimeString();
 bool init();

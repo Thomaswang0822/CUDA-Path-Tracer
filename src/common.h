@@ -6,7 +6,12 @@
 #define BVH_DISABLE false
 #define ENABLE_GBUFFER false
 #define CAMERA_PANORAMA false
-#define AVERAGE_SPP true
+
+#define DEBUG_RED   glm::vec3(1.f, 0.f, 0.f);
+#define DEBUG_GREEN glm::vec3(0.f, 1.f, 0.f);
+#define DEBUG_BLUE  glm::vec3(0.f, 0.f, 1.f);
+
+#define ABS_SCENE_PATH "D:/Code/CUDA-Path-Tracer/scenes"
 
 struct ToneMapping {
     enum {
@@ -27,12 +32,13 @@ struct Settings {
     static int tracer;
     static bool sortMaterial;
     static int GBufferPreviewOpt;
-
+    static bool averageSPP;
     static bool enableReSTIR;
 };
 
 struct State {
     static bool camChanged;
+    static int iteration;  // spp so far
 };
 
 struct ReSTIRSettings {

@@ -20,7 +20,7 @@ std::map<std::string, int> MaterialTypeTokenMap = {
 std::map<std::string, MeshData*> Resource::meshDataPool;
 std::map<std::string, Image*> Resource::texturePool;
 
-const std::filesystem::path scenes_path("D:/Code/CUDA-Path-Tracer/scenes");
+const std::filesystem::path scenes_path(ABS_SCENE_PATH);
 
 MeshData* Resource::loadOBJMesh(const std::string& filename) {
     auto find = meshDataPool.find(filename);
@@ -348,7 +348,7 @@ void Scene::loadCamera() {
             }
         }
         else if (tokens[0] == "Sample") {
-            state.iterations = std::stoi(tokens[1]);
+            state.spp = std::stoi(tokens[1]);
         }
         else if (tokens[0] == "Depth") {
             Settings::traceDepth = std::stoi(tokens[1]);

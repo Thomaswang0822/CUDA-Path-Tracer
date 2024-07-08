@@ -16,7 +16,6 @@ static double lastY;
 
 Scene* scene;
 RenderState* renderState;
-int iteration;
 
 int width;
 int height;
@@ -27,13 +26,26 @@ int height;
 namespace devBuffer {
 	glm::vec3* image = nullptr;
 
-
-	void init() {
-
+	/**
+	 * cudaMalloc + cudaMemset on device buffers, should be used only once.
+	 */
+	static void init() {
+		image = CUDA::safeMalloc<glm::vec3>(width * height);
 	}
 
-	void free() {
+	/**
+	 * cudaFree on device buffers, should be used only once.
+	 */
+	static void free() {
+		CUDA::safeFree(image);
+	}
 
+	///
+	/// cudaMemset on individual buffers; clear data but hold memory
+	/// 
+
+	static void clearImageBuf() {
+		cudaMemset(image, 0, sizeof(glm::vec3) * width * height);
 	}
 }
 
@@ -56,7 +68,7 @@ int main(int argc, char** argv) {
 	scene->buildDevData();
 
 	// Set up camera stuff from loaded path tracer settings
-	iteration = 0;
+	State::iteration = 0;
 	renderState = &scene->state;
 	Camera& cam = scene->camera;
 	width = cam.resolution.x;
@@ -64,10 +76,12 @@ int main(int argc, char** argv) {
 
 	// Initialize CUDA and GL components
 	init();
+	devBuffer::init();
 
 	// GLFW main loop
 	mainLoop();
 
+	devBuffer::free();
 	scene->clear();
 	Resource::clear();
 
@@ -75,19 +89,13 @@ int main(int argc, char** argv) {
 }
 
 void saveImage() {
-#if AVERAGE_SPP
-	float spp = iteration;
-#else
-	float spp = 1.0f;
-#endif // AVERAGE_SPP
-	
 	// output image file
 	Image img(width, height);
 
 	for (int x = 0; x < width; x++) {
 		for (int y = 0; y < height; y++) {
 			int index = x + (y * width);
-			glm::vec3 color = renderState->image[index] / spp;
+			glm::vec3 color = renderState->image[index];
 			switch (Settings::toneMapping) {
 			case ToneMapping::Filmic:
 				color = Math::filmic(color);
@@ -105,7 +113,7 @@ void saveImage() {
 
 	std::string filename = renderState->imageName;
 	std::ostringstream ss;
-	ss << filename << "." << startTimeString << "." << spp << "spp";
+	ss << filename << "." << startTimeString << "." << scene->state.spp << "spp";
 	if (Settings::tracer == Tracer::ReSTIR_DI) {
 		ss << ReSTIRSettings::M_Light << "Ml" << ReSTIRSettings::M_BSDF << "Mb";
 	}
@@ -117,8 +125,11 @@ void saveImage() {
 }
 
 void runCuda() {
+	if (!Settings::averageSPP) {
+		State::camChanged = true;
+	}
 	if (State::camChanged) {
-		iteration = 0;
+		State::iteration = 0;
 		scene->camera.update();
 		State::camChanged = false;
 	}
@@ -126,19 +137,20 @@ void runCuda() {
 	// Map OpenGL buffer object for writing from CUDA on a single GPU
 	// No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
 
-	if (iteration == 0) {
-		pathTraceFree();
-		pathTraceInit(scene);
+	if (State::iteration == 0) {
+		//pathTraceFree();
+		//pathTraceInit(scene);
+		devBuffer::clearImageBuf();
 	}
 
-	if (iteration < renderState->iterations) {
+	if (State::iteration < renderState->spp) {
 		uchar4* pbo_dptr = NULL;
-		iteration++;
+		State::iteration++;
 		cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
 
 		// execute the kernel
-		int frame = 0;
-		pathTrace(pbo_dptr, frame, iteration);
+		//int frame = 0;  // never used now
+		pathTrace(pbo_dptr, devBuffer::image, scene);
 
 		// unmap buffer object
 		cudaGLUnmapBufferObject(pbo);

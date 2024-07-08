@@ -6,10 +6,11 @@ int Settings::toneMapping = ToneMapping::None;
 int Settings::tracer = Tracer::SingleKernel;
 bool Settings::sortMaterial = false;
 int Settings::GBufferPreviewOpt = 0;
-
+bool Settings::averageSPP = false;
 bool Settings::enableReSTIR = false;
 
 bool State::camChanged = true;
+int State::iteration = 0;
 
 int ReSTIRSettings::M_Light = 16;
 int ReSTIRSettings::M_BSDF = 4;

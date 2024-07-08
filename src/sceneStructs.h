@@ -80,7 +80,7 @@ struct PathSegment {
 };
 
 struct RenderState {
-    unsigned int iterations;
+    unsigned int spp;
     std::vector<glm::vec3> image;
     std::string imageName;
 };

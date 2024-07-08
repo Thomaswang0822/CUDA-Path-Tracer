@@ -26,7 +26,6 @@ using namespace std;
 //-------------------------------
 
 extern Scene* scene;
-extern int iteration;
 
 extern int width;
 extern int height;

@@ -234,6 +234,9 @@ void RenderImGui() {
 		if (ImGui::InputInt("Max Depth", &Settings::traceDepth, 1, 1)) {
 			State::camChanged = true;
 		}
+		if (ImGui::Checkbox("Average over Pixel Samples", &Settings::averageSPP)) {
+			State::camChanged = true;
+		}
 		ImGui::Separator();
 
 		ImGui::Text("Post Processing");
@@ -285,7 +288,7 @@ void mainLoop() {
 
 		runCuda();
 
-		string title = "CIS565 Path Tracer | " + utilityCore::convertIntToString(iteration) + " Iterations";
+		string title = "CUDA Path Tracer | " + utilityCore::convertIntToString(State::iteration) + " Iterations";
 		glfwSetWindowTitle(window, title.c_str());
 		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
 		glBindTexture(GL_TEXTURE_2D, displayImage);

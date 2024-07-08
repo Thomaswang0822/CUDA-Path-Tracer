@@ -13,21 +13,16 @@
 
 //Kernel that writes the image to the OpenGL PBO directly.
 __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution,
-    int iter, glm::vec3* Image, int toneMapping) {
+    glm::vec3* Image, int toneMapping
+) {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-
-#if AVERAGE_SPP
-    float spp = static_cast<float>(iter);
-#else
-    float spp = 1.0f;
-#endif // AVERAGE_SPP
 
     if (x < resolution.x && y < resolution.y) {
         int index = x + (y * resolution.x);
 
         // Tonemapping and gamma correction
-        glm::vec3 color = Image[index] / spp;
+        glm::vec3 color = Image[index];
 
         switch (toneMapping) {
         case ToneMapping::Filmic:
@@ -49,9 +44,6 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution,
         pbo[index].z = iColor.z;
     }
 }
-
-static Scene* hstScene = nullptr;
-static glm::vec3* devImage = nullptr;
 
 #if ENABLE_GBUFFER
 static Intersection* devGBuffer = nullptr;
@@ -98,14 +90,7 @@ __global__ void renderGBuffer(DevScene* scene, Camera cam, Intersection *GBuffer
 }
 
 void pathTraceInit(Scene* scene) {
-    hstScene = scene;
-
-    const Camera& cam = hstScene->camera;
-    const int pixelcount = cam.resolution.x * cam.resolution.y;
-
-    devImage = CUDA::safeMalloc<glm::vec3>(pixelcount);
-
-    checkCUDAError("pathTraceInit");
+    //hstScene = scene;
 
 #if ENABLE_GBUFFER
     cudaMalloc(&devGBuffer, pixelcount * sizeof(Intersection));
@@ -122,7 +107,6 @@ void pathTraceInit(Scene* scene) {
 }
 
 void pathTraceFree() {
-    CUDA::safeFree(devImage);  // no-op if devImage is null
 #if ENABLE_GBUFFER
     CUDA::safeFree(devGBuffer);
 #endif
@@ -142,17 +126,13 @@ __global__ void previewGBuffer(int iter, DevScene* scene, const Camera cam, glm:
     scene->intersect(ray, intersec);
 
     if (kind == 0) {
-        image[index] += intersec.pos;
+        image[index] = intersec.pos;
     }
     else if (kind == 1) {
-        if (intersec.primId != NullPrimitive) {
-            const Material m = scene->getTexturedMaterialAndSurface(intersec);
-            // put 
-        }
-        image[index] += (intersec.norm + 1.f) * .5f;
+        image[index] = (intersec.norm + 1.f) * .5f;
     }
     else if (kind == 2) {
-        image[index] += glm::vec3(intersec.uv, 1.f);
+        image[index] = glm::vec3(intersec.uv, 1.f);
     }
 }
 
@@ -260,7 +240,6 @@ __global__ void shadeReSTIR_DI(
      * DI version 2: combine light sampling and BSDF sampling with MIS.
      */
 
-    
     ReSTIR::Reservoir r;
     glm::vec3 p_hat;     // Li * BSDF * cos
     float pLight, pBSDF; // "cheap" pdf, light or BSDF
@@ -344,20 +323,14 @@ __global__ void shadeReSTIR_DI(
         static_cast<float>(!scene->testOcclusion(intersec.pos, xi));
     accRadiance = f_q * r.W;
 
-    //accRadiance = glm::vec3(r.w_sum);  // 0 => every w_proposal is 0
-    
 #pragma endregion
 
 WriteRadiance:
     if (isnan(accRadiance.x) || isnan(accRadiance.y) || isnan(accRadiance.z) ||
         isinf(accRadiance.x) || isinf(accRadiance.y) || isinf(accRadiance.z)) {
-        return;
+        accRadiance = glm::vec3(0.f);
     }
-#if AVERAGE_SPP
-    image[index] += accRadiance;
-#else
-    image[index] = accRadiance;
-#endif // AVERAGE_SPP
+    image[index] = (image[index] * float(iter) + accRadiance) / float(iter + 1);
 }
 
 __global__ void singleKernelPT(int iter, int maxDepth, DevScene* scene, Camera cam, glm::vec3* image) {
@@ -480,11 +453,7 @@ WriteRadiance:
         isinf(accRadiance.x) || isinf(accRadiance.y) || isinf(accRadiance.z)) {
         return;
     }
-#if AVERAGE_SPP
-    image[index] += accRadiance;
-#else
-    image[index] = accRadiance;
-#endif // AVERAGE_SPP
+    image[index] = (image[index] * float(iter) + accRadiance) / float(iter + 1);
 }
 
 __global__ void BVHVisualize(int iter, DevScene* scene, Camera cam, glm::vec3* image) {
@@ -507,10 +476,10 @@ __global__ void BVHVisualize(int iter, DevScene* scene, Camera cam, glm::vec3* i
         logDepth += 1.f;
         size >>= 1;
     }
-    image[index] += glm::vec3(float(intersec.primId) / logDepth * .06f);
+    image[index] = glm::vec3(float(intersec.primId) / logDepth * .06f);
 }
 
-void pathTrace(uchar4* pbo, int frame, int iter) {
+void pathTrace(uchar4* pbo, glm::vec3* devImage, Scene* hstScene) {
     const Camera& cam = hstScene->camera;
     const int pixelCount = cam.resolution.x * cam.resolution.y;
 
@@ -525,17 +494,17 @@ void pathTrace(uchar4* pbo, int frame, int iter) {
     switch (Settings::tracer)
     {
     case Tracer::SingleKernel:
-        singleKernelPT << <singlePTBlockNum, singlePTBlockSize >> > (iter, Settings::traceDepth, hstScene->devScene, cam, devImage);
+        singleKernelPT << <singlePTBlockNum, singlePTBlockSize >> > (State::iteration, Settings::traceDepth, hstScene->devScene, cam, devImage);
         break;
     case Tracer::BVHVisualize:
-        BVHVisualize << <singlePTBlockNum, singlePTBlockSize >> > (iter, hstScene->devScene, cam, devImage);
+        BVHVisualize << <singlePTBlockNum, singlePTBlockSize >> > (State::iteration, hstScene->devScene, cam, devImage);
         break;
     case Tracer::GBufferPreview:
-        previewGBuffer << <singlePTBlockNum, singlePTBlockSize >> > (iter, hstScene->devScene, cam, devImage,
+        previewGBuffer << <singlePTBlockNum, singlePTBlockSize >> > (State::iteration, hstScene->devScene, cam, devImage,
             Settings::GBufferPreviewOpt);
         break;
     case Tracer::ReSTIR_DI:
-        shadeReSTIR_DI << <singlePTBlockNum, singlePTBlockSize >> > (iter,
+        shadeReSTIR_DI << <singlePTBlockNum, singlePTBlockSize >> > (State::iteration,
             ReSTIRSettings::M_Light, ReSTIRSettings::M_BSDF,
             hstScene->devScene, cam, devImage);
     default:
@@ -548,7 +517,7 @@ void pathTrace(uchar4* pbo, int frame, int iter) {
         (cam.resolution.x + blockSize2D.x - 1) / blockSize2D.x,
         (cam.resolution.y + blockSize2D.y - 1) / blockSize2D.y);
     // Send results to OpenGL buffer for rendering
-    sendImageToPBO<<<blocksPerGrid2D, blockSize2D>>>(pbo, cam.resolution, iter, devImage, Settings::toneMapping);
+    sendImageToPBO<<<blocksPerGrid2D, blockSize2D>>>(pbo, cam.resolution, devImage, Settings::toneMapping);
 
     // Retrieve image from GPU
     CUDA::copyDevToHost(hstScene->state.image.data(), devImage,
