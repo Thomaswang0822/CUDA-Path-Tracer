@@ -145,12 +145,12 @@ void runCuda() {
 
 	if (State::iteration < renderState->spp) {
 		uchar4* pbo_dptr = NULL;
-		State::iteration++;
 		cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
 
 		// execute the kernel
 		//int frame = 0;  // never used now
 		pathTrace(pbo_dptr, devBuffer::image, scene);
+		State::iteration++;
 
 		// unmap buffer object
 		cudaGLUnmapBufferObject(pbo);
