@@ -13,3 +13,4 @@ int State::iteration = 0;
 
 int ReSTIRSettings::M_Light = 16;
 int ReSTIRSettings::M_BSDF = 4;
+//int ReSTIRSettings::spatialRadius = 3;

@@ -42,4 +42,5 @@ struct State {
 struct ReSTIRSettings {
     static int M_Light;
     static int M_BSDF;
+    //static int spatialRadius;   // in pixels
 };

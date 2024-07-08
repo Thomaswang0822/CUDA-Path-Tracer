@@ -4,7 +4,7 @@
 #include "scene.h"
 
 namespace ReSTIR {
-	void init();
+	void init(Scene* hostScene);
 	void free();
 	void reset();
 

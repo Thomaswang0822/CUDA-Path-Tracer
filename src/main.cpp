@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
 	// Initialize CUDA and GL components
 	init();
 	devBuffer::init();
-	ReSTIR::init();
+	ReSTIR::init(scene);
 
 	// GLFW main loop
 	mainLoop();
