@@ -219,11 +219,25 @@ void RenderImGui() {
 	}
 
 	ImGui::Begin("Options"); {
-		const char* Tracers[] = { "Single Kernel", "BVH Visualize", "GBuffer Preview", "ReSTIR_DI"};
-		if (ImGui::Combo("Tracer", &Settings::tracer, Tracers, IM_ARRAYSIZE(Tracers))) {
+		if (ImGui::Checkbox("Use ReSTIR", &Settings::enableReSTIR)) {
 			State::camChanged = true;
 		}
+		ImGui::Separator();
 
+		if (Settings::enableReSTIR) {
+			if (ImGui::InputInt("M_Light", &ReSTIRSettings::M_Light, 1, 1)) {
+				State::camChanged = true;
+			}
+			if (ImGui::InputInt("M_BSDF", &ReSTIRSettings::M_BSDF, 1, 1)) {
+				State::camChanged = true;
+			}
+		}
+		else {
+			const char* Tracers[] = { "PathTrace", "BVH Visualize", "GBuffer Preview" };
+			if (ImGui::Combo("Tracer", &Settings::tracer, Tracers, IM_ARRAYSIZE(Tracers))) {
+				State::camChanged = true;
+			}
+		}
 		if (Settings::tracer == Tracer::GBufferPreview) {
 			const char* Modes[] = { "Position", "Normal", "Texcoord" };
 			if (ImGui::Combo("Mode", &Settings::GBufferPreviewOpt, Modes, IM_ARRAYSIZE(Modes))) {

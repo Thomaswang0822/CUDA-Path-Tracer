@@ -17,6 +17,7 @@
 #include "image.h"
 #include "pathtrace.h"
 #include "utilities.h"
+#include "restir.h"
 #include "scene.h"
 
 using namespace std;

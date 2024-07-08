@@ -77,10 +77,12 @@ int main(int argc, char** argv) {
 	// Initialize CUDA and GL components
 	init();
 	devBuffer::init();
+	ReSTIR::init();
 
 	// GLFW main loop
 	mainLoop();
 
+	ReSTIR::free();
 	devBuffer::free();
 	scene->clear();
 	Resource::clear();
@@ -114,7 +116,7 @@ void saveImage() {
 	std::string filename = renderState->imageName;
 	std::ostringstream ss;
 	ss << filename << "." << startTimeString << "." << scene->state.spp << "spp";
-	if (Settings::tracer == Tracer::ReSTIR_DI) {
+	if (Settings::enableReSTIR) {
 		ss << ReSTIRSettings::M_Light << "Ml" << ReSTIRSettings::M_BSDF << "Mb";
 	}
 	filename = ss.str();
@@ -141,6 +143,7 @@ void runCuda() {
 		//pathTraceFree();
 		//pathTraceInit(scene);
 		devBuffer::clearImageBuf();
+		ReSTIR::reset();
 	}
 
 	if (State::iteration < renderState->spp) {
@@ -149,7 +152,12 @@ void runCuda() {
 
 		// execute the kernel
 		//int frame = 0;  // never used now
-		pathTrace(pbo_dptr, devBuffer::image, scene);
+		if (Settings::enableReSTIR) {
+			ReSTIR::trace(pbo_dptr, devBuffer::image, scene);
+		}
+		else {
+			pathTrace(pbo_dptr, devBuffer::image, scene);
+		}
 		State::iteration++;
 
 		// unmap buffer object

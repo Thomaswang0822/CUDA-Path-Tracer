@@ -3,11 +3,10 @@
 
 int Settings::traceDepth = 0;
 int Settings::toneMapping = ToneMapping::None;
-int Settings::tracer = Tracer::SingleKernel;
-bool Settings::sortMaterial = false;
+int Settings::tracer = Tracer::PathTrace;
 int Settings::GBufferPreviewOpt = 0;
-bool Settings::averageSPP = false;
-bool Settings::enableReSTIR = false;
+bool Settings::averageSPP = true;
+bool Settings::enableReSTIR = true;
 
 bool State::camChanged = true;
 int State::iteration = 0;
