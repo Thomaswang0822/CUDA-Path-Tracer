@@ -219,13 +219,12 @@ __global__ void kernelPT(int iter, int maxDepth, DevScene* scene, Camera cam, gl
         // break from PT loop if bounced ray hits background
         if (intersec.primId == NullPrimitive) {
             if (scene->envMap != nullptr) {
-                glm::vec3 radiance = scene->envMap->linearSample(Math::toPlane(ray.direction))
-                    * throughput;
+                glm::vec3 radiance = scene->envMap->linearSample(Math::toPlane(ray.direction));
 
                 float weight = deltaSample ? 1.f :
-                    Math::powerHeuristic(sample.pdf, scene->environmentMapPdf(ray.direction));
+                    Math::balanceHeuristic(sample.pdf, scene->environmentMapPdf(ray.direction));
 
-                accRadiance += radiance * weight;
+                accRadiance += radiance * throughput * weight;
             }
             break;
         }
@@ -242,11 +241,11 @@ __global__ void kernelPT(int iter, int maxDepth, DevScene* scene, Camera cam, gl
             glm::vec3 radiance = material.baseColor;
 
             float lightPdf = Math::pdfAreaToSolidAngle(
-                Math::luminance(radiance) * 2.f * glm::pi<float>() * scene->getPrimitiveArea(intersec.primId) * scene->sumLightPowerInv,
+                Math::luminance(radiance) * PiTwo * scene->getPrimitiveArea(intersec.primId) * scene->sumLightPowerInv,
                 curPos, intersec.pos, intersec.norm
             );
 
-            float weight = deltaSample ? 1.f : Math::powerHeuristic(sample.pdf, lightPdf);
+            float weight = deltaSample ? 1.f : Math::balanceHeuristic(sample.pdf, lightPdf);
             accRadiance += radiance * throughput * weight;
             break;
         }

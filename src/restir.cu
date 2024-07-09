@@ -13,7 +13,7 @@
 #include "restir.h"
 
 #ifdef __INTELLISENSE__
-void __syncthreads();
+void __syncthreads() {};
 #endif
 
 extern __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution,
@@ -216,16 +216,13 @@ __global__ void kernelRIS(
         r.update({ wi, xi, p_hat }, w_proposal, sample1D(rng));
     }
 
-    // Algorithm 3 line 8; reuse some variables
-    glm::vec3 wi = r.y.dir;
-    glm::vec3 xi = r.y.position;
-    p_hat = r.y.targetFunc;
-    float p_hat_q = ReSTIR::toScalar(p_hat);
+    // Algorithm 3 line 8
+    float p_hat_q = ReSTIR::toScalar(r.y.targetFunc);
     r.W = r.w_sum / p_hat_q;  // Note Eq 3.2
 
     // Algorithm 3 line 11
     glm::vec3 f_q = r.y.targetFunc *
-        static_cast<float>(!scene->testOcclusion(intersec.pos, xi));
+        static_cast<float>(!scene->testOcclusion(intersec.pos, r.y.position));
     accRadiance = f_q * r.W;
 
 #pragma endregion
@@ -317,6 +314,7 @@ __global__ void kernelSpatial(
         }
     }
     // BSDF sampling
+    
     BSDFSample sampledInfo;
     bool deltaSample;
     for (int i = 0; i < M_BSDF; i++) {
@@ -356,6 +354,7 @@ __global__ void kernelSpatial(
         // See Course Notes p10-11
         r.update({ wi, xi, p_hat }, w_proposal, sample1D(rng));
     }
+    
 
     // Algorithm 3 line 8; reuse some variables
     glm::vec3 wi = r.y.dir;
@@ -375,7 +374,7 @@ __global__ void kernelSpatial(
     // pick 5 neighbors
     for (int i = 0; i < 5; i++) {
         int index_qi = ReSTIR::sampleNeighbor(x, y, cam.resolution, sample2D(rng));
-        if (index_qi == INVALID_INDEX) {
+        if (index_qi == INVALID_INDEX || index_qi == index) {
             continue;
         }
         // combine

@@ -89,7 +89,7 @@ struct Reservoir {
 
 	__device__ void combine(const Reservoir& r, float rand) {
 		// This is biased weight: need to eval self.p_hat on r;
-		float weight = ReSTIR::toScalar(r.y.targetFunc) * r.W;
+		float weight = ReSTIR::toScalar(r.y.targetFunc) * r.W / r.M;
 		w_sum += weight;
 		M += r.M;
 		if (rand * w_sum < weight) {
