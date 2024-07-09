@@ -411,15 +411,28 @@ void ReSTIR::trace(uchar4* pbo, glm::vec3* devImage, Scene* hstScene) {
     dim3 singlePTBlockNum(blockNumSinglePTX, blockNumSinglePTY);
     dim3 singlePTBlockSize(BlockSizeSinglePTX, BlockSizeSinglePTY);
 
-
-    /*kernelRIS << <singlePTBlockNum, singlePTBlockSize >> > (State::iteration,
+    switch (ReSTIRSettings::reuseOption)
+    {
+    case Reuse::RIS:
+        kernelRIS << <singlePTBlockNum, singlePTBlockSize >> > (State::iteration,
         ReSTIRSettings::M_Light, ReSTIRSettings::M_BSDF,
-        hstScene->devScene, cam, devImage);*/
-
+            hstScene->devScene, cam, devImage);
+        break;
+    case Reuse::Spatial:
     kernelSpatial << <singlePTBlockNum, singlePTBlockSize >> > (State::iteration,
         ReSTIRSettings::M_Light, ReSTIRSettings::M_BSDF,
         hstScene->devScene, cam, devImage,
         spatialRSV);
+        break;
+    case Reuse::Temporal:
+        // NOT IMPLEMENTED
+        break;
+    case Reuse::SpTemp:
+        // NOT IMPLEMENTED
+        break;
+    default:
+        break;
+    }
 
     // 2D block sending pixel data
     const dim3 blockSize2D(8, 8);

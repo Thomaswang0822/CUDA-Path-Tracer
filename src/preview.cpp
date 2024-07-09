@@ -231,6 +231,10 @@ void RenderImGui() {
 			if (ImGui::InputInt("M_BSDF", &ReSTIRSettings::M_BSDF, 1, 1)) {
 				State::camChanged = true;
 			}
+			const char* reuseOptions[] = { "RIS", "Spatial", "Temporal", "Spatialtemporal"};
+			if (ImGui::Combo("Tracer", &ReSTIRSettings::reuseOption, reuseOptions, IM_ARRAYSIZE(reuseOptions))) {
+				State::camChanged = true;
+			}
 		}
 		else {
 			const char* Tracers[] = { "PathTrace", "BVH Visualize", "GBuffer Preview" };

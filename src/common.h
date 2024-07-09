@@ -39,8 +39,15 @@ struct State {
     static int iteration;  // spp so far
 };
 
+struct Reuse {
+    enum {
+        RIS = 0b00, Spatial = 0b01, Temporal = 0b10, SpTemp = 0b11
+    };
+};
+
 struct ReSTIRSettings {
     static int M_Light;
     static int M_BSDF;
     //static int spatialRadius;   // in pixels
+    static int reuseOption;
 };
