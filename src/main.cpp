@@ -115,15 +115,15 @@ void saveImage() {
 
 	std::string filename = renderState->imageName;
 	std::ostringstream ss;
-	ss << filename << "." << startTimeString << "." << scene->state.spp << "spp";
+	ss << filename << "." << startTimeString << "." << State::iteration << "spp";
 	if (Settings::enableReSTIR) {
 		ss << ReSTIRSettings::M_Light << "Ml" << ReSTIRSettings::M_BSDF << "Mb";
 	}
 	filename = ss.str();
 
 	// CHECKITOUT
-	//img.savePNG(filename);
-	img.saveHDR(filename);  // Save a Radiance HDR file
+	img.savePNG(filename);
+	//img.saveHDR(filename);  // Save a Radiance HDR file
 }
 
 void runCuda() {

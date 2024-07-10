@@ -128,7 +128,7 @@ __global__ void kernelRIS(
 
             // Update reservoir even if sampling failed, otherwise biased.
             // See Course Notes p10-11
-            r.update({ wi, xi, p_hat }, w_proposal, sample1D(rng));
+            r.update({ wi, xi, intersec.norm, p_hat }, w_proposal, sample1D(rng));
         }
 
         // Algorithm 3 line 8; reuse some variables
@@ -179,7 +179,7 @@ __global__ void kernelRIS(
 
             // Update reservoir even if sampling failed, otherwise biased.
             // See Course Notes p10-11
-            r.update({ wi, xi, p_hat }, w_proposal, sample1D(rng));
+            r.update({ wi, xi, intersec.norm, p_hat }, w_proposal, sample1D(rng));
         }
     }
     // BSDF sampling
@@ -220,7 +220,7 @@ __global__ void kernelRIS(
 
         // Update reservoir even if sampling failed, otherwise biased.
         // See Course Notes p10-11
-        r.update({ wi, xi, p_hat }, w_proposal, sample1D(rng));
+        r.update({ wi, xi, intersec.norm, p_hat }, w_proposal, sample1D(rng));
     }
 
     // Algorithm 3 line 8
@@ -320,7 +320,7 @@ __global__ void kernelSpatial(
 
             // Update reservoir even if sampling failed, otherwise biased.
             // See Course Notes p10-11
-            r.update({ wi, xi, p_hat }, w_proposal, sample1D(rng));
+            r.update({ wi, xi, intersec.norm, p_hat }, w_proposal, sample1D(rng));
         }
     }
     // BSDF sampling
@@ -362,7 +362,7 @@ __global__ void kernelSpatial(
 
         // Update reservoir even if sampling failed, otherwise biased.
         // See Course Notes p10-11
-        r.update({ wi, xi, p_hat }, w_proposal, sample1D(rng));
+        r.update({ wi, xi, intersec.norm, p_hat }, w_proposal, sample1D(rng));
     }
     
 
@@ -386,7 +386,7 @@ __global__ void kernelSpatial(
         int index_qi = ReSTIR::sampleNeighbor(x, y, cam.resolution, sample2D(rng));
         // TODO: check and invalidate with "unbias" tricks, DI paper Sec5
         if (index_qi == INVALID_INDEX || index_qi == index ||
-            !Reservoir::validNeighbor(index_qi, reservoirs)) {
+            !r.validNeighbor(index_qi, cam.position, reservoirs)) {
             continue;
         }
         /// Now we treat current-pixel and all neighbor reservoirs equally,

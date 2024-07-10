@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 
 #define INVALID_INDEX -1
-#define PIXEL_RADIUS 3.f
+#define PIXEL_RADIUS 30.f
 
 // ReSTIR utility functions
 namespace ReSTIR {
@@ -56,6 +56,7 @@ struct SampledLight {
 	/** Data */
 	glm::vec3 dir = glm::vec3(0.f, 1.f, 0.f);  // shading-point dependent
 	glm::vec3 position = glm::vec3(0.f);
+	glm::vec3 shadingNormal = glm::vec3(0.f, 1.f, 0.f);
 	glm::vec3 targetFunc = glm::vec3(0.f);  // p_hat = Le * bsdf * cosTerm
 
 	__device__ void operator = (const SampledLight& rhs) {
@@ -66,8 +67,8 @@ struct SampledLight {
 };
 
 /**
-	* Reservoir that consists of N=1 sample.
-	*/
+ * Reservoir that consists of N=1 sample.
+ */
 struct Reservoir {
 	SampledLight y;  // output sample
 	float w_sum = 0.f;  // sum of weights
@@ -99,7 +100,31 @@ struct Reservoir {
 		}
 	}
 
-	__device__ static bool validNeighbor(int index_qi, Reservoir* reservoirs) {
-		return reservoirs[index_qi].M != 0;
+	__device__ bool validNeighbor(
+		int index_qi, 
+		glm::vec3 camPos,
+		Reservoir* reservoirs
+	) const {
+		const Reservoir& r = reservoirs[index_qi];  // neighbor
+		// NULL Reservoir
+		if (r.M == 0) {
+			return false;
+		}
+		// target function differ by 25%
+		float myPHat = ReSTIR::toScalar(this->y.targetFunc);
+		float rPHat = ReSTIR::toScalar(r.y.targetFunc);
+		if (fabs(myPHat - rPHat) * 0.25f > myPHat) {
+			return false;
+		}
+		// camera distance differ by 10%
+		float myDist = glm::length(this->y.position - camPos);
+		if (fabs(myDist - glm::length(r.y.position - camPos)) > 0.1f * myDist) {
+			return false;
+		}
+		// shading normal differ by >25 degree
+		if (Math::absDot(this->y.dir, r.y.dir) < Cos25Deg) {
+			return false;
+		}
+		return true;
 	}
 };

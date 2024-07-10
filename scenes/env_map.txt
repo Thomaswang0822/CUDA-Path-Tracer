@@ -4,7 +4,7 @@ FovY        40
 LensRadius	0
 FocalDist	11
 ApertureMask	Null
-Sample		512
+Sample		2048
 Depth		1
 File        EnvMap
 Eye         0 0 10
@@ -111,7 +111,7 @@ NormalMap	Null
 
 Object 	Floor
 model/square.obj
-Material 	Red
+Material 	White
 Translate	0 -3 0
 Rotate	0 0 0
 Scale		100 100 100

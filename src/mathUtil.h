@@ -13,6 +13,7 @@
 #define PiInv 1.f / Pi
 #define OneThirdSqrt 0.5773502691896257645091487805019574556476f
 #define EpsCmp 0.00001f
+#define Cos25Deg 0.9063077
 
 static std::string vec3ToString(const glm::vec3& vec) {
     std::stringstream ss;
