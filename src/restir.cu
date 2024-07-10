@@ -22,15 +22,19 @@ extern __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution,
 
 ////////////////////////////////////
 // Reservoir GBuffer memory used by ReSTIR
+static int pixelcount = 0;
 Reservoir* spatialRSV = nullptr;
 ////////////////////////////////////
 
 
 void ReSTIR::init(Scene* hostScene) {
     const Camera& cam = hostScene->camera;
-    const int pixelcount = cam.resolution.x * cam.resolution.y;
+    pixelcount = cam.resolution.x * cam.resolution.y;
 
     spatialRSV = CUDA::safeMalloc<Reservoir>(pixelcount);
+
+    cudaDeviceSynchronize();  // Ensure memset is completed
+    checkCUDAError("ReSTIR::init");
 }
 
 void ReSTIR::free() {
@@ -38,7 +42,10 @@ void ReSTIR::free() {
 }
 
 void ReSTIR::reset() {
+    cudaMemset(spatialRSV, 0, sizeof(Reservoir) * pixelcount);
 
+    cudaDeviceSynchronize();  // Ensure memset is completed
+    checkCUDAError("ReSTIR::reset");
 }
 
 __global__ void kernelRIS(
@@ -251,6 +258,9 @@ __global__ void kernelSpatial(
     glm::vec3 accRadiance(0.f);
 
     int index = y * cam.resolution.x + x;
+    /// WHY is it necessary? 
+    /// each byte is 0 != each Reservoir is properly initialized
+    reservoirs[index] = Reservoir();
     Sampler rng = makeSeededRandomEngine(iter, index, 0, scene->sampleSequence);
 
     Ray ray = cam.sample(x, y, sample4D(rng));
@@ -261,7 +271,7 @@ __global__ void kernelSpatial(
     if (intersec.primId == NullPrimitive) {
         if (scene->envMap != nullptr) {
             glm::vec2 uv = Math::toPlane(ray.direction);
-            accRadiance += scene->envMap->linearSample(uv);
+            accRadiance = scene->envMap->linearSample(uv);
         }
         goto WriteRadiance;
     }
@@ -356,11 +366,8 @@ __global__ void kernelSpatial(
     }
     
 
-    // Algorithm 3 line 8; reuse some variables
-    glm::vec3 wi = r.y.dir;
-    glm::vec3 xi = r.y.position;
-    p_hat = r.y.targetFunc;
-    float p_hat_q = ReSTIR::toScalar(p_hat);
+    // Algorithm 3 line 8
+    float p_hat_q = ReSTIR::toScalar(r.y.targetFunc);
     r.W = r.w_sum / p_hat_q;  // Note Eq 3.2
 
     // Evaluate visibility to the initial candidate
@@ -372,20 +379,29 @@ __global__ void kernelSpatial(
     __syncthreads();
 
     // pick 5 neighbors
-    for (int i = 0; i < 5; i++) {
+    const int nNeighbor = 5;
+    int nEffectiveNeighbor = 1;
+    Reservoir rNeighbors;
+    for (int i = 0; i < nNeighbor; i++) {
         int index_qi = ReSTIR::sampleNeighbor(x, y, cam.resolution, sample2D(rng));
-        if (index_qi == INVALID_INDEX || index_qi == index) {
+        // TODO: check and invalidate with "unbias" tricks, DI paper Sec5
+        if (index_qi == INVALID_INDEX || index_qi == index ||
+            !Reservoir::validNeighbor(index_qi, reservoirs)) {
             continue;
         }
-        // combine
-        // TODO: check and invalidate with "unbias" tricks, DI paper Sec5
-        r.combine(reservoirs[index_qi], sample1D(rng));
+        /// Now we treat current-pixel and all neighbor reservoirs equally,
+        /// because each had been normalized in the RIS stage.
+        /// So it's okay to skip combine/update if "my neighbor doesn't work
+        /// for me", because such invalid neighbors contribute 0 weight anyway.
+        rNeighbors.combine(reservoirs[index_qi], sample1D(rng));
+        nEffectiveNeighbor++;
     }
-    r.W = r.w_sum / ReSTIR::toScalar(r.y.targetFunc);
+    r.update(rNeighbors.y, rNeighbors.w_sum, sample1D(rng));
+    r.W = r.w_sum / (nEffectiveNeighbor * ReSTIR::toScalar(r.y.targetFunc));
 
     // Algorithm 3 line 11
     glm::vec3 f_q = r.y.targetFunc *
-        static_cast<float>(!scene->testOcclusion(intersec.pos, xi));
+        static_cast<float>(!scene->testOcclusion(intersec.pos, r.y.position));
     accRadiance = f_q * r.W;
 
 
@@ -395,6 +411,7 @@ WriteRadiance:
         accRadiance = glm::vec3(0.f);
     }
     image[index] = (image[index] * float(iter) + accRadiance) / float(iter + 1);
+    //image[index] = accRadiance;
 }
 
 void ReSTIR::trace(uchar4* pbo, glm::vec3* devImage, Scene* hstScene) {
@@ -415,14 +432,14 @@ void ReSTIR::trace(uchar4* pbo, glm::vec3* devImage, Scene* hstScene) {
     {
     case Reuse::RIS:
         kernelRIS << <singlePTBlockNum, singlePTBlockSize >> > (State::iteration,
-        ReSTIRSettings::M_Light, ReSTIRSettings::M_BSDF,
+            ReSTIRSettings::M_Light, ReSTIRSettings::M_BSDF,
             hstScene->devScene, cam, devImage);
         break;
     case Reuse::Spatial:
-    kernelSpatial << <singlePTBlockNum, singlePTBlockSize >> > (State::iteration,
-        ReSTIRSettings::M_Light, ReSTIRSettings::M_BSDF,
-        hstScene->devScene, cam, devImage,
-        spatialRSV);
+        kernelSpatial << <singlePTBlockNum, singlePTBlockSize >> > (State::iteration,
+            ReSTIRSettings::M_Light, ReSTIRSettings::M_BSDF,
+            hstScene->devScene, cam, devImage,
+            spatialRSV);
         break;
     case Reuse::Temporal:
         // NOT IMPLEMENTED
@@ -433,6 +450,7 @@ void ReSTIR::trace(uchar4* pbo, glm::vec3* devImage, Scene* hstScene) {
     default:
         break;
     }
+    cudaDeviceSynchronize();
 
     // 2D block sending pixel data
     const dim3 blockSize2D(8, 8);

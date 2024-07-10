@@ -41,7 +41,7 @@ namespace ReSTIR {
 		int offy = y + offset.y;
 		int idx = offy * resolution.x + offx;
 
-		if (offx < 0 || offx >= resolution.x || offy < 0 || offy > resolution.y) {
+		if (offx < 0 || offx >= resolution.x || offy < 0 || offy >= resolution.y) {
 			return INVALID_INDEX;
 		}
 		return idx;
@@ -74,6 +74,8 @@ struct Reservoir {
 	uint32_t M = 0;  // number of samples seen so far
 	float W = 0.f;  // Unbiased Contribution Weight (UCW) see Eq. 6 in DI paper
 
+	__host__ __device__ Reservoir() = default;
+
 	/**
 	 * ReSTIR DI paper Algorithm 2.
 	 *
@@ -87,13 +89,17 @@ struct Reservoir {
 		}
 	}
 
-	__device__ void combine(const Reservoir& r, float rand) {
+	__device__ void combine(const Reservoir r, float rand) {
 		// This is biased weight: need to eval self.p_hat on r;
-		float weight = ReSTIR::toScalar(r.y.targetFunc) * r.W / r.M;
+		float weight = ReSTIR::toScalar(r.y.targetFunc) * r.W;
 		w_sum += weight;
 		M += r.M;
 		if (rand * w_sum < weight) {
 			y = r.y;
 		}
+	}
+
+	__device__ static bool validNeighbor(int index_qi, Reservoir* reservoirs) {
+		return reservoirs[index_qi].M != 0;
 	}
 };
