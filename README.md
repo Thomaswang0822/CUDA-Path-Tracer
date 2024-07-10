@@ -30,27 +30,27 @@ version path tracer because it wouldn't match the expected DI result. (Radiance 
 postponed to next path segment.) We will refer to it as "the reference" from now on.
 
 We found that using `M_Light = 16` and `M_BSDF = 4` candidate samples is a reasonable choices. We will refer to
-our path tracer under this setting as "version 2".
+our path tracer under this setting as "RIS".
 
 - Converged rendering comparison:
 
 The reference:
 
-<img src="img-ReSTIR/version2-ref-512spp.png" width="900">
+<img src="img-ReSTIR/ref.png" width="900">
 
-Version 2:
+RIS:
 
-<img src="img-ReSTIR/version2-16ML-4MB-256spp.png" width="900">
+<img src="img-ReSTIR/ris.png" width="900">
 
 - Real-time performance comparison:
 
 The reference:
 
-<img src="img-ReSTIR/version2-ref-2spp.png" width="900">
+<img src="img-ReSTIR/ref-2spp.png" width="900">
 
-Version 2:
+RIS:
 
-<img src="img-ReSTIR/version2-16ML-4MB-1spp.png" width="900">
+<img src="img-ReSTIR/ris-1spp.png" width="900">
 
 The reference renders at 57.5 FPS, while version 2 renders at 29 FPS.
 In order to be fair, we compare the reference rendering with 2 spp against our RIS rendering with 1 spp
@@ -61,3 +61,16 @@ as light (a giant light). The top-left subregion is the brightest, and this help
 on the bottom-right corner is not as clean. Recommended by the ReSTIR DI paper, we generate light candidates
 from the target function $\hat{p}$ (I'd like to call it cheap function) absent of shadow ray occlusion test. Thus, noises in this region mostly come from the occlusion by the 4 floating meshes, and cannot be addressed
 well by RIS-only version 2 code.
+
+## Spatial Reuse
+
+I implemented spatial reservoirs reuse first and didn't see much improvement, as pointed out by the Course Note.
+
+Spatial reuse is built upon Version 2 RIS, and the performance dropped from 29 to 25 FPS.
+
+<img src="img-ReSTIR/sp-1spp.png" width="900">
+
+A strange artifact was also found, most possibly caused by meshed sphere (sorry, this path tracer doesn't have native sphere supported)
+and the bad sample sequence.
+
+<img src="img-ReSTIR/debug-img/sp-artifact.png" width="300">
